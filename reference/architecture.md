@@ -119,8 +119,10 @@ training:
   curriculum_stage: 3
   total_timesteps: 5_000_000
 constraints:
-  hold_days: {values: [0, 7, 14, 30, 60, 90, 180]}
-  max_drawdown: {values: [0.05, 0.10, 0.15, 0.20, 0.25]}
+  lock:
+    hold_days: {values: [15, 21, 30, 42, 60]}   # the D16 operating range
+  drawdown:
+    max_drawdown: {values: [0.05, 0.10, 0.15, 0.20, 0.25]}
 ```
 
 Rules:

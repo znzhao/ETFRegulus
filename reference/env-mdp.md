@@ -96,11 +96,25 @@ a logged ablation in [rl-training.md](rl-training.md), never the primary run.
 
 `N` and `D_max` are sampled per episode and enter the observation, so one policy serves the whole grid.
 
+Canonical definition in [../config/constraints.yaml](../config/constraints.yaml) (D16):
+
 ```yaml
-training_parameters:
-  hold_days:     {values: [0, 7, 14, 30, 60, 90, 180]}
-  max_drawdown:  {values: [0.05, 0.10, 0.15, 0.20, 0.25]}
+lock:
+  hold_days:
+    primary: 30                              # the deployment value
+    values:  [15, 21, 30, 42, 60]            # the operating range: a sqrt(2) ladder,
+    weights: [0.15, 0.20, 0.30, 0.20, 0.15]  #   geometrically centred on 30
+    stress_values: [0, 7, 90, 180]           # Stage 9 only, reported as OOD
+drawdown:
+  max_drawdown:
+    primary: 0.15
+    values:  [0.05, 0.10, 0.15, 0.20, 0.25]
+    weights: null                            # uniform
 ```
+
+`N` is centred on 30 because that is where the constraint will actually sit; `D_max` is
+uniform because there is no single expected value for it — the whole point of conditioning
+on `D_max` is to serve a caller who picks their own ceiling.
 
 Training on a single fixed pair would not be a parameter-conditioned policy at all. The curriculum
 ([rl-training.md](rl-training.md)) widens this distribution in stages rather than starting from the full grid.
@@ -170,8 +184,9 @@ Guarantee: `D_t <= D_max` at reset in the normal mode.
 ## 7. Episode length
 
 Sampled per episode from `{63, 126, 252, 504}` sessions rather than fixed at 252, so the policy does not
-overfit to one horizon — which matters because `N` up to 180 calendar days is a large fraction of a short
-episode, and a policy trained only on 252-day episodes would learn horizon-specific end effects.
+overfit to one horizon — which matters because `N` at the top of the operating range (60 calendar days,
+~42 sessions) is a large fraction of a 63-session episode, and a policy trained only on 252-day episodes
+would learn horizon-specific end effects.
 
 **Evaluation is different:** walk-forward runs the full natural calendar year, unsegmented
 ([evaluation.md](evaluation.md)). Training-time episode chopping is a variance-reduction device, not a

@@ -38,7 +38,10 @@ stress test, not a decision input. The two code paths are deliberately separate
 
 ### 1.2 `N` sensitivity
 
-Sweep `N ∈ {0, 7, 14, 30, 60, 90, 180}` with `D_max` fixed. Report per `N`: realized max drawdown, return,
+Sweep `N ∈ {0, 7, 15, 21, 30, 42, 60, 90, 180}` with `D_max` fixed — the D16 operating range plus its
+out-of-distribution stress points. **Every cell at `N ∈ {0, 7, 90, 180}` is labelled out-of-distribution**
+in the output: the policy was not trained there, so those cells characterize degradation rather than
+measure performance. Report per `N`: realized max drawdown, return,
 turnover, fraction of NAV locked, actions blocked by lock, and market-forced breach count.
 
 **Expected shape:** larger `N` → less maneuverability → more market-forced breaches and lower turnover. If
@@ -61,7 +64,9 @@ tolerance, run more seeds before concluding it is a bug, then treat it as one).
 
 ### 1.4 Combined grid
 
-`N × D_max`, default 3×3 per D5 (`N ∈ {0, 30, 180}`, `D_max ∈ {0.05, 0.15, 0.25}`), full 7×5 via
+`N × D_max`, default 3×3 per D5 (`N ∈ {15, 30, 60}` — the operating range, so the default grid measures
+the system where it is meant to run — with `D_max ∈ {0.05, 0.15, 0.25}`), full 9×5 including the
+out-of-distribution `N` via
 `--grid full`. This is the direct test of parameter conditioning: a single policy must behave sensibly
 across the whole grid, not just near the modal training parameters.
 
@@ -139,7 +144,7 @@ Worth writing down before generating results that will be tempting to over-read:
 | "Under `D_max = 0.10`, realized drawdown stayed under 10% in 8 of 9 test years; the exception was market-forced with locked exposure of X%" | "The system guarantees a 10% maximum drawdown" |
 | "Across 1000 stationary-bootstrap replicates, annualized return had a 90% band of [a, b]" | "Expected return is the bootstrap mean" |
 | "In the constructed correlation-spike scenario the policy lost X%" | "Worst case is X%" |
-| "Performance degrades gracefully as `N` increases from 0 to 180" | "The system is robust to any holding constraint" |
+| "Performance degrades gracefully as `N` increases from 0 to 180, with `N > 60` out-of-distribution" | "The system is robust to any holding constraint" |
 
 The core thesis applies here: the hard part of this problem was never PPO versus SAC. It is whether the
 constraint machinery is correct and whether its limitations are stated honestly.

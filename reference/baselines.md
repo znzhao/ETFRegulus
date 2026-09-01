@@ -52,7 +52,8 @@ Notes:
   Dividends reinvest into SPY via the ledger's total-return mechanism
   ([portfolio-ledger.md](portfolio-ledger.md) §3), which is what makes this a true total-return benchmark
   rather than a price-return one.
-- **Lock interaction: none.** One buy, no sells, ever. It is legal at every `N` including 180.
+- **Lock interaction: none.** One buy, no sells, ever. It is legal at every `N`, including the
+  out-of-distribution 180.
 - **This makes it a control.** B1's results must be *identical* across every value of `N`. If they are not,
   the lock manager is corrupting state it should not touch — a high-value invariant, and it is asserted as a
   test.
@@ -102,6 +103,11 @@ different *risk* profile from B1/B3, not just a different return stream, which i
   **B2 is therefore the most informative baseline for `N` sensitivity** ([robustness.md](robustness.md) §1.2),
   because its performance should degrade visibly and monotonically as `N` grows. If it does not, the lock is
   not actually binding, and that is a bug worth catching before it hides inside a trained policy.
+- **B2 sits exactly on the D16 boundary.** 30 calendar days is ~21 sessions, and a monthly rebalance is also
+  ~21 sessions, so at the primary `N = 30` the unlock date lands almost precisely on the next rebalance. B2 is
+  therefore the most sensitive baseline in the set to the operating range: a small change in `N` flips it
+  between "can rebalance" and "cannot". That is a feature — it makes the `N`-sensitivity curve steepest at
+  the value the system will actually be deployed at, which is where it is most worth measuring.
 - **Availability matters.** Only assets past inception are ranked ([features.md](features.md) §2). The
   selection universe grows from ~20 to ~25 names over the sample.
 - **Warm-up:** needs `252 + 21 = 273` sessions of history. The 2003 buffer covers this for a 2004 start.

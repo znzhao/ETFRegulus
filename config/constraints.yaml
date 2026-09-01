@@ -1,0 +1,86 @@
+# The hard constraints: the holding lock, the drawdown ceiling, the projection backend,
+# and the risk estimators. Read by Stages 4-9.
+#
+# This file is the canonical, machine-readable definition of the (N, D_max) parameter
+# space. reference/decisions.md D16 and reference/env-mdp.md section 4 are the rationale;
+# a test asserts the grids here match what those documents state.
+
+lock:
+  # Per-ETF, not portfolio-wide (D13). Buying ETF i relocks only ETF i.
+  scope: per_etf          # {per_etf, portfolio} -- `portfolio` exists only as an ablation
+
+  # N is in CALENDAR days, never trading days. The first legal sell date is the first
+  # XNYS session on or after `execution_date + timedelta(days=N)`.
+  hold_days:
+    # The deployment value, and the one every report leads with (D16).
+    primary: 30
+
+    # The operating range the policy is trained and evaluated over: centred on 30 and
+    # varying around it, from a fortnight to two months.
+    #
+    # It is a sqrt(2) ladder rather than an evenly spaced one, because a holding period
+    # is a multiplicative quantity: going 30 -> 60 days is the same size of change as
+    # going 30 -> 15, while 30 -> 45 and 30 -> 15 are not. So the grid is centred on 30
+    # GEOMETRICALLY -- weighted geometric mean 29.9 -- and every step is a factor of
+    # ~1.41. An evenly spaced grid over the same endpoints would sit at an effective
+    # centre above 30 while still looking symmetric.
+    values:  [15, 21, 30, 42, 60]
+
+    # Sampled per episode, peaked on the primary value. Uniform if omitted. The point of
+    # the weighting is that the policy spends most of its capacity where the constraint
+    # will really sit, while still seeing enough of the tails to condition on N rather
+    # than memorize one lock length.
+    weights: [0.15, 0.20, 0.30, 0.20, 0.15]
+
+    # Deliberately OUTSIDE the operating range. Used only by the Stage 9 sensitivity
+    # sweep, to characterize how the policy degrades beyond what it was trained for.
+    # Every result at one of these values is reported as out-of-distribution.
+    #   N=0   -- the no-lock control; also curriculum stage 1's mechanics-only setting
+    #   N=7   -- a weekly lock
+    #   N=90  -- a quarterly lock
+    #   N=180 -- the half-year extreme
+    stress_values: [0, 7, 90, 180]
+
+drawdown:
+  # The maximum-drawdown ceiling. An ACTION-level safety constraint, never a guarantee
+  # about the realized path, and never a reward penalty (D11, risk-envelope.md section 1).
+  max_drawdown:
+    primary: 0.15
+    values:  [0.05, 0.10, 0.15, 0.20, 0.25]
+    # Uniform: unlike N, there is no single expected deployment value here -- the whole
+    # point of conditioning on D_max is to serve a caller who picks their own ceiling.
+    weights: null
+
+projection:
+  backend: analytic       # {analytic, cvxpy} -- D3; cvxpy is the correctness oracle in tests
+  alpha_tolerance: 1.0e-3 # bisection tolerance on the de-risking scan (~10 risk evaluations)
+
+risk:
+  # PENDING CALIBRATION (open question Q1). These are starting values, to be resolved
+  # empirically in Stage 5 against the equal_weight and spy_tlt_60_40 baselines
+  # (reference/risk-envelope.md section 7). Do not treat them as settled.
+  quantile: 0.01
+  horizon_days: 5         # must exceed one day: the constraint has to survive the
+                          # overnight gap plus a few sessions, because the lock may
+                          # prevent reacting
+  block_length: 10        # mean block length, stationary bootstrap (geometric)
+  aggregation: max        # {max, mean, quantile} -- `max` is the conservative default,
+                          # and the right one for a hard constraint
+  intervention_rate_ceiling: 0.50   # above this the envelope is over-calibrated
+
+  estimators: [rolling, block_bootstrap, crisis_windows]
+
+  # At decision time only windows that ENDED before the current session may be used: a
+  # 2005 decision cannot be stress-tested against 2008. Stage 9 evaluation deliberately
+  # uses the full library, and the two code paths are kept distinct.
+  crisis_windows:
+    gfc:           ["2007-10-01", "2009-03-31"]
+    covid:         ["2020-02-19", "2020-03-23"]
+    rate_shock_22: ["2022-01-01", "2022-10-31"]
+    taper_tantrum: ["2013-05-01", "2013-09-30"]
+    volmageddon:   ["2018-02-01", "2018-02-28"]
+    selloff_18q4:  ["2018-10-01", "2018-12-31"]
+
+execution:
+  cost_bps: 0.0           # D10 -- frictionless at v1. Settled, not revisited. The code
+                          # path exists and is unit-tested with a non-zero value.

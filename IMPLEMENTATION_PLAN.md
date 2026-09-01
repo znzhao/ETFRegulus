@@ -11,8 +11,10 @@
 A daily-frequency, parameter-conditioned RL portfolio allocator over a fixed ETF universe, subject to two
 *hard* exogenous constraints supplied at inference time:
 
-- `N` — a resettable, ETF-level holding lock in **calendar days**. Buying or adding to an ETF relocks *that
-  ETF's entire holding* for `N` days; other holdings keep their own independent clocks (D13).
+- `N` — a resettable, ETF-level holding lock in **calendar days**, **centred on 30** (D16). Buying or adding
+  to an ETF relocks *that ETF's entire holding* for `N` days; other holdings keep their own independent
+  clocks (D13). Operating range `[15, 21, 30, 42, 60]`; `{0, 7, 90, 180}` are out-of-distribution stress
+  points used only by Stage 9.
 - `D_max` — a maximum-drawdown ceiling enforced by a deterministic safety layer, **never** by reward shaping.
 
 The policy proposes weights; a deterministic projection + risk envelope makes them legal; the environment
@@ -79,6 +81,7 @@ and the consequences each one carries.
 | D12 | Full robustness battery planned, gated behind a working walk-forward result |
 | D13 | Lock scope is **per-ETF**, not portfolio-wide: buying ETF i relocks only ETF i |
 | D14 | `torch==2.13.0+cu126` on the RTX 3060 Ti. **`training.device: cpu`** — GPU verified working but benchmarked slower end-to-end |
+| D16 | **`N` is centred on 30 calendar days.** Operating range `[15, 21, 30, 42, 60]` (a √2 ladder, geometrically centred on 30), weighted toward 30; `{0, 7, 90, 180}` retained as out-of-distribution stress points only. Canonical in `config/constraints.yaml` |
 | D15 | Primary benchmarks: **SPY buy-and-hold, 12-1 momentum, 60/40 SPY-TLT**; cash, equal-weight and classical also required |
 
 ## 5. Phases and stages

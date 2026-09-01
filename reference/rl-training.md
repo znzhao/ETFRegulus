@@ -103,10 +103,10 @@ Five stages, run in order, each warm-started from the previous checkpoint. One c
 | Stage | Config | `N` | `D_max` | Initial state | Episode len | Risk envelope |
 |---|---|---|---|---|---|---|
 | 1 | `ppo_stage1.yaml` | 0 | fixed 0.20 | flat (all cash) | 252 | off |
-| 2 | `ppo_stage2.yaml` | {7, 30} | fixed 0.20 | flat | 252 | off |
-| 3 | `ppo_stage3.yaml` | full grid | full grid | flat | 252 | off |
-| 4 | `ppo_stage4.yaml` | full grid | full grid | flat | 252 | **on** |
-| 5 | `ppo_stage5.yaml` | full grid | full grid | **reservoir** | {63,126,252,504} | on |
+| 2 | `ppo_stage2.yaml` | {21, 30, 42} | fixed 0.20 | flat | 252 | off |
+| 3 | `ppo_stage3.yaml` | operating range | full grid | flat | 252 | off |
+| 4 | `ppo_stage4.yaml` | operating range | full grid | flat | 252 | **on** |
+| 5 | `ppo_stage5.yaml` | operating range | full grid | **reservoir** | {63,126,252,504} | on |
 
 Rationale for the ordering: Stage 1 isolates portfolio mechanics with nothing else to confound them, so if the
 agent cannot beat cash there, the bug is in the simulator, not the RL. Each later stage adds exactly one source
@@ -143,8 +143,12 @@ device: cpu              # D14 — measured, not assumed. See gpu-setup.md §3
 
 Notes:
 
-- `gamma = 0.999` because the step is one day and the constraint horizon (`N` up to 180 calendar days) is long.
-  A conventional 0.99 has an effective horizon of ~100 steps, which is shorter than the lock itself.
+- `gamma = 0.999` is inherited from a superseded parameter range and is **open question Q7**. It was
+  justified by "`N` up to 180 calendar days"; under D16 the lock is centred on 30 calendar days (~21
+  sessions), for which a conventional 0.99 — effective horizon ~100 sessions — is already several times
+  the constraint horizon. 0.999 gives ~1000 sessions, roughly four years, which is far longer than the
+  longest episode (504 sessions). It is left unchanged here because it is a tuned value and D16 is a
+  specification change; settle it on a validation year, which is the only place tuning is permitted.
 - Entropy matters more than usual here: a softmax over 25+ assets collapses to a single-asset corner readily,
   and a collapsed policy looks stable while learning nothing.
 - Reward scale: daily log returns are `~1e-3`. Use SB3's value normalization (`VecNormalize(norm_reward=True)`)

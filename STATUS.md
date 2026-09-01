@@ -14,7 +14,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 | **Current stage** | **Phase 0 complete.** Next: Stage 4 — the deterministic simulator |
 | **Run this** | `python -m scripts.s04_simulate --config config/sim/default.yaml` *(not yet written)* |
 | **Next gate** | Stage 4 — no RL code before it is green |
-| **Test suite** | 84 passed, 1 deselected (`network`), 4.9s — `.venv/Scripts/python.exe -m pytest -q` |
+| **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
+| **Test suite** | 99 passed, 1 deselected (`network`), 4.4s — `.venv/Scripts/python.exe -m pytest -q` |
 | **Last updated** | 2026-09-01 |
 
 ---
@@ -249,6 +250,7 @@ Spec in [reference/stages.md](reference/stages.md). The only requirement it plac
 | Q5 | Does `device: cpu` still win on the real env and at high worker counts? Margin is only **1.2x** | Stage 7 wall clock | Confirm in Stage 6; re-run on any architecture change |
 | Q3 | Does `proj_distance` decline without an auxiliary penalty? | Whether D9 mitigation 3 is needed | Observe in Curriculum stage 2–3 |
 | Q4 | Is the 3×3 stress grid sufficient, or is the full 7×5 needed? | Stage 9 runtime | Decide after Stage 8 timing is known |
+| Q7 | **`gamma = 0.999` is inherited from the superseded parameter range.** It was justified by "`N` up to 180 calendar days"; under D16 the lock is ~30 calendar days (~21 sessions), for which 0.99 (~100 sessions) is already several times the constraint horizon. 0.999 gives ~1000 sessions, ~4 years, far longer than the longest episode (504) | Stage 7 credit assignment and sample efficiency | Settle on a **validation** year, the only place tuning is permitted. Not changed as part of D16, because D16 is a spec change and gamma is a tuned value |
 | Q6 | **Which feature columns enter the observation?** Stage 3 emits **64 per-asset** columns (50 etf + 14 cross-sectional); 24 assets × 64 = 1,536 before the macro block, against the ~300-dim policy the D14 benchmark assumed | Stage 6 obs size, Stage 7 wall clock, and whether D14 still holds | Select in Stage 6, validated against `feature_manifest.json`. The manifest exists so the selection is explicit rather than implicit |
 
 ---
@@ -262,6 +264,8 @@ Spec in [reference/stages.md](reference/stages.md). The only requirement it plac
 | 2026-08-31 | Raw-price ledger / total-return NAV resolved as an explicit dividend-reinvestment ledger; T1 proves it. |
 | 2026-08-31 | Baselines moved ahead of PPO (draft had them at Milestone 10, after training). |
 | 2026-08-31 | **D15:** benchmark set fixed by the user — `spy_buy_hold`, `momentum` (12-1), `spy_tlt_60_40` as primary; `cash`, `equal_weight`, `classical_optimizer` retained because the acceptance criteria name them. Replaces the vague `spy` / `static_risk_aware` placeholders. See [reference/baselines.md](reference/baselines.md). |
+| 2026-09-01 | **D16: the lock is centred on 30 calendar days.** Operating range `[15, 21, 30, 42, 60]` — a √2 ladder, weighted `[.15, .20, .30, .20, .15]`, weighted geometric mean 29.9 — with `{0, 7, 90, 180}` retained as **out-of-distribution** stress points for Stage 9 only. Canonical in the new `config/constraints.yaml`; `reference/decisions.md` D16 carries the rationale; 15 tests pin the grid and assert no document still quotes the superseded `[0, 7, 14, 30, 60, 90, 180]` as current. Raises **Q7** (gamma). |
+| 2026-09-01 | **`config/constraints.yaml` written.** `architecture.md` had always listed it as a base config; it now exists, typed and validated, carrying the lock, the drawdown ceiling, the projection backend, the risk estimators (starting values, pending the Stage 5 calibration in Q1), the crisis-window library, and `cost_bps: 0.0` (D10). Stage 4 reads it. |
 | 2026-09-01 | **Phase 0 complete.** Stages 0-3 green; 84 tests pass in 4.9s (budget: 60s). Pipeline runs end to end from an empty `data/`. |
 | 2026-09-01 | **Calendar bounds pinned.** `exchange_calendars` defaults to a rolling 20-year window; unbounded it started 2006-09-01 and would have dropped 2003-2006 from every frame. `CALENDAR_START = "2002-01-01"`. |
 | 2026-09-01 | **Quality-gate checks taxonomized by `kind`.** Price checks (positivity, split-jump, OHLC range) apply to prices only; level series get a per-symbol `range` band. Driven by two facts in the real data: `^IRX` closed negative for 7 sessions in March 2020, and `^VIX` closed at 82.69 / `^VVIX` at 207.59 on 2020-03-16. |

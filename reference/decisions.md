@@ -229,3 +229,48 @@ most-exercised CUDA 12.x line. cu129 is stuck at torch 2.9.0.
 Stage 6 re-runs this benchmark whenever the policy architecture changes rather than inheriting the answer. A
 wider per-asset encoder or an attention block over assets could flip it, as could batching the rollout forward
 pass across many parallel envs.
+
+---
+
+## D16 — The lock is centred on 30 calendar days
+
+`N = 30` is the deployment value. The policy is trained and evaluated over a range that
+varies *around* 30, not over an arbitrary wide grid that happens to contain it.
+
+Canonical definition in [../config/constraints.yaml](../config/constraints.yaml):
+
+| | Values | Used by |
+|---|---|---|
+| **Primary** | `30` | Deployment; every report leads with this |
+| **Operating range** | `[15, 21, 30, 42, 60]`, weights `[.15, .20, .30, .20, .15]` | Training and evaluation |
+| **Out-of-distribution** | `[0, 7, 90, 180]` | Stage 9 sensitivity sweep only |
+
+**Why a sqrt(2) ladder rather than evenly spaced values.** A holding period is a
+multiplicative quantity: 30 -> 60 days is the same size of change as 30 -> 15, whereas
+30 -> 45 and 30 -> 15 are not. So the grid steps by a factor of ~1.41 and is centred on
+30 *geometrically* — weighted geometric mean 29.9. The superseded grid
+`[0, 7, 14, 30, 60, 90, 180]` had 30 as merely the fourth of seven equally likely values,
+with a median of 30 but a mass strongly skewed long; a policy trained on it would spend
+most of its capacity on lock lengths that will never be deployed.
+
+**Why the tails are still there.** A policy trained at a single `N` is not a
+parameter-conditioned policy at all — it cannot be asked what happens at 45 days, and it
+has no reason to encode `N` in its value function rather than memorizing one lock length.
+The weighting concentrates capacity near 30 while keeping enough spread for the
+conditioning to be real.
+
+**Why `0`, `7`, `90` and `180` were moved out rather than deleted.** They remain valuable
+as *characterization*, and worthless as training distribution. `N = 0` is the no-lock
+control (and curriculum stage 1's mechanics-only setting); `180` is the extreme at which
+`momentum` should degenerate toward buy-and-hold. Stage 9 sweeps all of them and labels
+every such result **out-of-distribution**, so a graceful-degradation claim cannot be
+quietly upgraded into a claim about the operating range.
+
+**Cost, and one consequence to pick up.** The narrower range is a weaker robustness claim:
+this system is not evidence about a 180-day lock, and the reports must say so. It also
+reopens a hyperparameter — `gamma = 0.999` was justified in
+[rl-training.md](rl-training.md) section 5 by "`N` up to 180 calendar days". At `N ~ 30`
+(~21 sessions) that argument no longer carries, and 0.999 gives an effective horizon of
+~1000 sessions, roughly four years. `gamma` is **not** changed here, because it is a tuned
+value and this is a specification change; it is recorded as open question Q7 and settled
+on a validation year, which is the only place tuning is permitted.

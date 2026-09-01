@@ -162,3 +162,108 @@ class FeaturesConfig:
     folds: FoldSpec = field(default_factory=FoldSpec)
     epsilon: float = 1e-12
     correlation_report_threshold: float = 0.95
+
+
+# ------------------------------------------------------------ config/constraints.yaml
+
+
+@dataclass(frozen=True)
+class HoldDaysSpec:
+    """The holding-lock parameter space, in CALENDAR days (D16).
+
+    Centred on `primary`; `values` is the operating range the policy is trained and
+    evaluated over; `stress_values` sit deliberately outside it and are used only by the
+    Stage 9 sensitivity sweep.
+    """
+
+    primary: int = 30
+    values: list[int] = field(default_factory=lambda: [14, 21, 30, 45, 60])
+    weights: list[float] | None = field(
+        default_factory=lambda: [0.15, 0.20, 0.30, 0.20, 0.15])
+    stress_values: list[int] = field(default_factory=lambda: [0, 7, 90, 180])
+
+    def __post_init__(self) -> None:
+        if self.primary not in self.values:
+            raise ValueError(
+                f"hold_days.primary ({self.primary}) must appear in values {self.values}"
+            )
+        if self.weights is not None and len(self.weights) != len(self.values):
+            raise ValueError(
+                f"hold_days.weights has {len(self.weights)} entries for "
+                f"{len(self.values)} values"
+            )
+        if self.weights is not None and abs(sum(self.weights) - 1.0) > 1e-9:
+            raise ValueError(f"hold_days.weights sum to {sum(self.weights)}, not 1.0")
+        overlap = set(self.values) & set(self.stress_values)
+        if overlap:
+            raise ValueError(
+                f"stress_values {sorted(overlap)} are inside the operating range; a "
+                f"stress point must be out-of-distribution to mean anything"
+            )
+
+
+@dataclass(frozen=True)
+class MaxDrawdownSpec:
+    primary: float = 0.15
+    values: list[float] = field(default_factory=lambda: [0.05, 0.10, 0.15, 0.20, 0.25])
+    weights: list[float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.primary not in self.values:
+            raise ValueError(
+                f"max_drawdown.primary ({self.primary}) must appear in values {self.values}"
+            )
+
+
+@dataclass(frozen=True)
+class LockSpec:
+    scope: Literal["per_etf", "portfolio"] = "per_etf"
+    hold_days: HoldDaysSpec = field(default_factory=HoldDaysSpec)
+
+
+@dataclass(frozen=True)
+class DrawdownSpec:
+    max_drawdown: MaxDrawdownSpec = field(default_factory=MaxDrawdownSpec)
+
+
+@dataclass(frozen=True)
+class ProjectionSpec:
+    backend: Literal["analytic", "cvxpy"] = "analytic"
+    alpha_tolerance: float = 1e-3
+
+
+@dataclass(frozen=True)
+class RiskSpec:
+    quantile: float = 0.01
+    horizon_days: int = 5
+    block_length: int = 10
+    aggregation: Literal["max", "mean", "quantile"] = "max"
+    intervention_rate_ceiling: float = 0.50
+    estimators: list[str] = field(
+        default_factory=lambda: ["rolling", "block_bootstrap", "crisis_windows"])
+    crisis_windows: dict[str, list[str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ExecutionSpec:
+    cost_bps: float = 0.0     # D10 -- frictionless at v1
+
+
+@dataclass(frozen=True)
+class ConstraintsConfig:
+    lock: LockSpec = field(default_factory=LockSpec)
+    drawdown: DrawdownSpec = field(default_factory=DrawdownSpec)
+    projection: ProjectionSpec = field(default_factory=ProjectionSpec)
+    risk: RiskSpec = field(default_factory=RiskSpec)
+    execution: ExecutionSpec = field(default_factory=ExecutionSpec)
+
+    @property
+    def hold_days_grid(self) -> list[int]:
+        """The operating range. Stress points are NOT included -- ask for them by name."""
+        return list(self.lock.hold_days.values)
+
+    @property
+    def full_hold_days_grid(self) -> list[int]:
+        """Operating range plus the out-of-distribution stress points, sorted."""
+        hd = self.lock.hold_days
+        return sorted(set(hd.values) | set(hd.stress_values))
