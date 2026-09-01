@@ -21,6 +21,68 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 ---
 
+## Finished
+
+**Phases 0 and 1 are complete.** Stages 0–5 are `[x]`: every gating test named for them in
+[reference/testing.md](reference/testing.md) §3 passes, and each stage runs end to end from a
+clean checkout.
+
+| | Stage | Entry point | Gate | State |
+|---|---|---|---|---|
+| **Phase 0** | 0 — Preflight | `s00_check_env` | T16 | `[x]` 35/35 checks |
+| | 1 — Fetch | `s01_fetch_data` | symbol pins, coverage | `[x]` 31 symbols + 10 FRED series |
+| | 2 — Curate | `s02_curate_data` | I5, T15 data-side, gate at zero | `[x]` 172,202 rows, 0 hard violations |
+| | 3 — Features | `s03_build_features` | I6, T10, manifest | `[x]` 163 columns, 14 fold scalers |
+| **Phase 1** | **4 — Simulator** | `s04_simulate` | **I1–I6, T1–T7, T15** | `[x]` **THE GATE — GREEN** |
+| | 5 — Baselines | `s05_run_baselines` | zero violations + 5 checks | `[x]` all six, all checks pass |
+
+**Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
+
+| | Covers | Where |
+|---|---|---|
+| I1 | cash ≥ 0, shares ≥ 0, NAV > 0 | `tests/portfolio/test_ledger_and_execution.py`, asserted at runtime in `Ledger` |
+| I2 | weights + cash sum to 1 | same, plus every real trajectory |
+| I3 | a locked position never shrinks | `tests/portfolio/test_lock_invariants.py` (**property-based**) |
+| I4 | an executed buy sets `unlock = exec + N` exactly | same |
+| I5 | nothing exists before inception | `tests/data/test_inception.py`, `tests/sim/test_simulator.py` |
+| I6 | no lookahead, incl. future-mutation | `tests/features/test_lookahead.py` |
+| T1 | **total-return reconstruction** | `tests/portfolio/test_total_return.py` — ≤9.6e-4 over all 24 tradables |
+| T2 | ledger + lock dict round-trip | `tests/portfolio/*` — also satisfies Stage 13's only requirement on current work |
+| T3 | projection idempotent on feasible points | `tests/constraints/test_projection.py` |
+| T4 | analytic vs **CVXPY oracle** | same |
+| T5 | risk **convexity** (replaces monotonicity) | `tests/constraints/test_risk_envelope.py` |
+| T6 | fallback always feasible, never raises | same |
+| T7 | no silent repair | `tests/constraints/test_projection.py` |
+| T10 | scaler fold isolation | `tests/features/test_scalers.py` |
+| T15 | fill price inside the day's range | `tests/portfolio/test_ledger_and_execution.py` |
+| T16 | stage harness | `tests/test_stage_harness.py` |
+
+Still to prove: **T8, T9, T11, T12, T13, T14** — all belong to Stages 6–8, which are not started.
+(T9 determinism is already asserted at the Stage 4 level; the vectorized-worker form is Stage 6's.)
+
+**Code built and committed:**
+
+```text
+src/cli/stage.py            the harness every entry point wraps
+src/config/                 layered YAML -> typed dataclasses, unknown key is an error
+src/data/                   calendar, fetch, curate (+ the quality gate)
+src/features/               etf, cross_sectional, macro, folds, scalers, builder
+src/portfolio/              ledger, lock_manager, valuation, execution
+src/constraints/            projector (analytic + cvxpy), risk_envelope
+src/sim/                    simulator, runner
+src/baselines/              the six strategies
+src/evaluation/             metrics
+scripts/s00..s05            six runnable stages
+config/                     universe, features, constraints, sim/default, evaluation
+tests/                      217 passing in 52s (budget 60s), 1 network test deselected
+```
+
+**Decisions locked and questions closed since planning:** D16 (lock centred on 30 calendar
+days) and Q1 (risk-envelope calibration). Three specification errors corrected from
+measurement — see *What Phase 1 caught* below.
+
+---
+
 ## Rules for whoever is working this file
 
 1. Work stages in order. Do not start a stage whose predecessor is not `[x]`.
@@ -218,7 +280,7 @@ only as a tie-break. Realized drawdown responds correctly to the ceiling:
 
 ---
 
-## Phase 2 — Environment and RL  `[x]` **UNBLOCKED** — Stage 4 is green
+## Phase 2 — Environment and RL  `[ ]` — **unblocked** (Stage 4 is `[x]`), not started
 
 ### `[ ]` Stage 6 — Env smoke test · `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500`
 
@@ -291,7 +353,10 @@ only as a tie-break. Realized drawdown responds correctly to the ceiling:
 ### `[-]` Stage 13 — Daily inference · **specified, not implemented** (D4)
 
 Spec in [reference/stages.md](reference/stages.md). The only requirement it places on current work is T2
-(ledger + lock manager dict round-trip), which is already in Stage 4's scope.
+(ledger + lock manager dict round-trip) — **satisfied in Stage 4**: `Ledger.to_dict/from_dict` and
+`LockManager.to_dict/from_dict` round-trip losslessly, tested including over `hypothesis`-generated
+states and after every step of a random buy/sell/hold sequence. Nothing further is owed to Stage 13
+until it is built.
 
 ---
 
@@ -300,7 +365,9 @@ Spec in [reference/stages.md](reference/stages.md). The only requirement it plac
 - [ ] Reward variants: + drawdown penalty; differential Sharpe
 - [ ] Auxiliary projection penalty `lambda ∈ {0, 0.001, 0.01}`
 - [ ] `lock.scope: portfolio` — the portfolio-wide lock variant
-- [ ] Risk aggregation `max` vs `mean`
+- [~] Risk aggregation `max` vs `mean` — **measured for the envelope in Stage 5** (both admissible;
+      `mean` returned +7.60% vs `max` +7.35% at the primary `D_max`, inside the noise, and `max` was kept
+      as the conservative default for a hard constraint). Still to run as a *policy* ablation
 - [ ] Flat MLP vs shared per-asset encoder
 
 ---
