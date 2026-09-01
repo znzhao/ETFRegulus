@@ -17,7 +17,7 @@ import numpy as np
 
 from src.env.feature_store import FeatureStore
 from src.env.observation import MANDATORY_GLOBAL, ObservationSpec, finite_or_raise
-from src.sim.engine import Decision
+from src.sim.simulator import StepContext
 
 #: `N = 0` is a legal stress value (the no-lock control), so every division by N guards
 #: against it rather than assuming the operating range.
@@ -28,14 +28,20 @@ def build_observation(
     spec: ObservationSpec,
     store: FeatureStore,
     feature_row: int,
-    dec: Decision,
+    ctx: StepContext,
     *,
     hold_days: int,
     max_drawdown: float,
     nav_at_reset: float,
     out: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Write one observation. `out` may be reused across steps to avoid reallocating."""
+    """Write one observation. `out` may be reused across steps to avoid reallocating.
+
+    Takes a `StepContext` rather than an engine `Decision` on purpose: a `StepContext` is
+    exactly what a weight source receives, so a trained policy can be wrapped as one and
+    run through `simulate()` like any baseline. That is what makes an RL trajectory and a
+    baseline trajectory the same artifact rather than two formats to reconcile.
+    """
     K = spec.n_assets
     F = spec.n_per_asset
     n_market = len(spec.per_asset_market)
@@ -48,7 +54,6 @@ def build_observation(
     obs[spec.macro_slice] = glob
 
     # ---- per-asset block ------------------------------------------------------
-    ctx = dec.ctx
     available = np.asarray(ctx.available, dtype=bool)
     weights = np.asarray(ctx.current_weights, dtype=np.float64)[1:]
     shares = ctx.ledger.share_vector(list(spec.tickers))

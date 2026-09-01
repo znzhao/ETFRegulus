@@ -211,6 +211,16 @@ def advance(
         "n_param": cfg.hold_days, "dmax_param": cfg.max_drawdown,
         "drawdown_budget": headroom(val.nav, val.peak, cfg.max_drawdown),
         "risk_budget": risk_budget(dec.nav, dec.ctx.peak, cfg.max_drawdown),
+        # The action that was actually PROJECTED, over [CASH, *universe], recorded so the
+        # preventable-violation detector can replay the decision rather than infer it
+        # from the position that resulted. Without this, "the executed action was in the
+        # feasible set" is an assertion the trajectory cannot support.
+        "proj_weights": projected.weights.astype(float).copy(),
+        "raw_weights": a_raw.astype(float).copy(),
+        # The decision-time state the replay needs, before the trade moved anything.
+        "decision_nav": float(dec.nav),
+        "decision_peak": float(dec.ctx.peak),
+        "decision_drawdown": float(dec.drawdown),
     }
     for j, t in enumerate(universe):
         shares = st.ledger.get(t)

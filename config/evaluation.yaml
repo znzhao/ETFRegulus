@@ -1,5 +1,10 @@
 # Stage 5 (baselines), Stage 8 (walk-forward) and Stages 9-12 (robustness, report).
-extends: sim/default.yaml
+#
+# Extends training.yaml rather than sim/default.yaml directly, because Stage 8 TRAINS: it
+# needs the observation selection, the policy architecture and the PPO block as well as
+# the simulator settings. training.yaml already pulls in sim/default.yaml and
+# observation.yaml, so this is one edge rather than three.
+extends: training.yaml
 
 baselines:
   # All six run through the IDENTICAL simulator and constraint layer as the agent.

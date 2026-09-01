@@ -11,7 +11,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Stage 7 complete — the curriculum trains and all five gates are green.** Next: Stage 8, walk-forward |
+| **Current stage** | **Stage 8 PASSED — the Phase 3 gate is open.** Next: Stage 9, the stress suite |
 | **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
 | **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
@@ -37,6 +37,7 @@ to end from a clean checkout.
 | | 5 — Baselines | `s05_run_baselines` | zero violations + 5 checks | `[x]` all six, all checks pass |
 | **Phase 2** | 6 — Env smoke test | `s06_smoke_env` | T8, T9, T14 + zero violations | `[x]` 7/7 checks, 31,500 steps, 0 violations |
 | | 7 — Train PPO | `s07_train_ppo` | per-rung: beats `cash`, zero violations | `[x]` 5/5 rungs green (demonstration budget) |
+| | **8 — Walk-forward** | `s08_walk_forward` | **T11, T12, T13 + hard acceptance** | `[x]` **13/13 folds, hard acceptance PASSED** |
 | **Phase 3** | 12 — Report *(comparison half)* | `s12_report` | allocations sum to 100, zero violations | `[~]` baseline reference report built; acceptance table awaits Stages 8–11 |
 
 **Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
@@ -60,10 +61,13 @@ to end from a clean checkout.
 | T15 | fill price inside the day's range | `tests/portfolio/test_ledger_and_execution.py` |
 | T8 | reset sampler reachable, `D_t ≤ D_max` | `tests/env/test_reset_sampler.py` — both generators, whole grid |
 | T9 | determinism, incl. across worker counts | `tests/env/test_determinism.py` |
+| T11 | walk-forward integrity: train < val < test | `tests/evaluation/test_walk_forward.py` |
+| T12 | selection is lexicographic; risk before return | `tests/evaluation/test_selection.py` |
+| T13 | the preventable-violation detector **fires** | `tests/evaluation/test_violation_taxonomy.py` — four injected bugs |
 | T14 | observation matches the manifest | `tests/env/test_observation.py` — asserted by NAME at index |
 | T16 | stage harness | `tests/test_stage_harness.py` |
 
-Still to prove: **T11, T12, T13** — all belong to Stage 8, which is not started.
+Every test in [reference/testing.md](reference/testing.md) §3 now has a home, and all of them pass.
 
 **Code built and committed:**
 
@@ -371,17 +375,57 @@ Three things the run confirmed, and one it did not:
   is the healthy D9 signal — but it rose within rung 2 (1.35 → 1.78) and rung 5 (0.84 → 0.95). At 300k
   timesteps and 19 logged points per rung this is suggestive, not an answer.
 
-### `[ ]` Stage 8 — Walk-forward · `python -m scripts.s08_walk_forward --config config/evaluation.yaml` · `python -m scripts.s08_walk_forward --config config/evaluation.yaml`
+### `[x]` Stage 8 — Walk-forward · `python -m scripts.s08_walk_forward --config config/evaluation.yaml`
 
-- [ ] Expanding annual folds, train/val/test with no overlap
-- [ ] Lexicographic model selection; `selection.json` per fold
-- [ ] Preventable-vs-market-forced violation taxonomy incl. the replay detector
-- [ ] Per-fold standard metrics
-- [ ] **Gate:** T11, T12, T13; zero lock/feasibility violations on every fold
+- [x] Expanding annual folds, train/val/test with no overlap — **T11**, checked before any compute runs
+- [x] Lexicographic model selection; `selection.json` per fold — **T12**
+- [x] Preventable-vs-market-forced violation taxonomy incl. the replay detector — **T13**
+- [x] Per-fold standard metrics, over a 3×3 `(N, D_max)` grid
+- [x] **Gate:** T11, T12, T13; zero lock/feasibility violations on every fold
+
+**13 folds (2012–2024) × 4 candidates × 40k timesteps. Hard acceptance PASSED: zero lock, zero
+feasibility, zero preventable `D_max` violations. No fold was marked `constraint validation failure`.**
+
+| Fold | Selected | Test return | Max DD | Preventable | Market-forced |
+|---|---|---|---|---|---|
+| 2012 | base | +6.11% | 7.20% | 0 | 0 |
+| 2013 | slow_lr | −6.48% | 12.99% | 0 | 0 |
+| 2014 | high_entropy_slow | +9.81% | 10.88% | 0 | 0 |
+| 2015 | high_entropy_slow | −8.62% | 23.22% | 0 | 1 |
+| 2016 | high_entropy | +14.83% | 6.26% | 0 | 0 |
+| 2017 | high_entropy_slow | +9.74% | 5.21% | 0 | 0 |
+| 2018 | base | −4.09% | 14.96% | 0 | 0 |
+| 2019 | slow_lr | +22.92% | 8.32% | 0 | 0 |
+| 2020 | slow_lr | +8.80% | 32.82% | 0 | 0 |
+| 2021 | slow_lr | +10.16% | 7.63% | 0 | 0 |
+| 2022 | high_entropy | −10.55% | 17.31% | 0 | 3 |
+| 2023 | high_entropy_slow | +18.19% | 14.20% | 0 | 0 |
+| 2024 | slow_lr | +8.49% | 6.93% | 0 | 0 |
+
+> **These are not performance results.** 40k timesteps per candidate against a configured 2,000,000 —
+> roughly 2% of the budget — chosen to exercise the whole protocol across every fold in ~83 min.
+> What the table establishes is that the *protocol* runs and its gates hold, not that the policy is good.
+> A proper comparison against the baselines needs the full budget and belongs in Stage 12.
+>
+> `Max DD` is the **worst cell** of the 3×3 grid, not the primary cell — a model safe on eight cells and
+> broken on the ninth is a broken model, so the aggregate takes the worst and sums the violations.
+
+What the run established beyond the gate:
+
+- **Selection is discriminating, not decorative.** All four candidates won at least two folds
+  (`slow_lr` 5, `high_entropy_slow` 4, `base` 2, `high_entropy` 2). A rule that always picked the same
+  candidate would mean the sweep was pointless.
+- **The taxonomy fired where it should.** Only 2015 and 2022 produced `D_max` breaches, both classified
+  **market-forced** with the evidence recorded — locked exposure, cash on hand, and the count of actions
+  the lock blocked. 2020 shows a 32.8% worst-cell drawdown with zero preventable violations, which is
+  the taxonomy doing exactly its job: COVID is not an implementation defect.
+- **`--seeds K` now does something.** It retrains the *selected* hyperparameters at fresh seeds and
+  reports the test spread; it does not re-run selection, because selecting K times and reporting the
+  best is a different and much weaker claim.
 
 ---
 
-## Phase 3 — Robustness  `[!]` blocked until Stage 8 is `[x]` (D12)
+## Phase 3 — Robustness  `[ ]` — **unblocked**: Stage 8 is `[x]` and hard acceptance passed (D12)
 
 ### `[ ]` Stage 9 — Stress · `python -m scripts.s09_stress --config config/evaluation.yaml --policy <path>`
 
@@ -479,6 +523,11 @@ until it is built.
 | 2026-09-01 | **The lock is what empties the risk envelope's feasible set.** With `N = 0`, `w_safe` is all cash and the fallback fires on 0.7% of steps at `D_max = 0.05`; with `N = 30` it fires on **28.5%**, though the envelope *binds* less often. The lock floors `w_safe` at holdings that carry real risk. Recorded in [reference/risk-envelope.md](reference/risk-envelope.md) §6b; it makes `infeasible_fallback` a first-class Stage 7 diagnostic and `D_max = 0.05` a cell to report separately. |
 | 2026-09-01 | **`src/sim/engine.py` extracted.** The per-step body is now shared verbatim between `simulate()` and `env.step`, so a baseline and a policy cannot drift onto different machinery — which was the whole reason for running the baselines through the simulator. Stage 4/5 behaviour is unchanged: all 108 Phase-1 tests still pass. |
 | 2026-09-01 | **Q2 closed: `n_envs = 8`, `SubprocVecEnv`** (2,844 steps/s). 8 → 16 workers buys 3.7% for twice the processes. |
+| 2026-09-01 | **Stage 8 PASSED — the Phase 3 gate is open.** 13 folds, 4 candidates each, 9 evaluation cells per fold: zero lock, zero feasibility, zero preventable `D_max` violations, and no fold marked `constraint validation failure`. T11, T12 and T13 all have homes and pass; every test in [testing.md](reference/testing.md) §3 is now covered. |
+| 2026-09-01 | **The preventable-violation detector needs the dividend stream, and this was found the hard way.** Its first real run produced **164 false positives** on `equal_weight` 2020 alone. A trajectory records shares *after* distributions are reinvested as accretion, and accretion is deliberately exempt from both the lock and the capital-preservation cap. The fix is exact — `shares_close = shares_executed × (1 + div/close)` inverts cleanly — and a threshold would not have worked: XLE paid \$0.2637 on 2020-03-23 into a collapsed \$11.79 price, a **2.24% one-day accretion** no fixed band separates from dip-buying. Corrected in [evaluation.md](reference/evaluation.md) §4. |
+| 2026-09-01 | **`trajectory.parquet` records `proj_weights` and `raw_weights`.** The taxonomy specifies a *replay*, and a replay needs the action the projection actually produced. Inferring legality from the resulting position is much weaker — prices move between the decision and the close. |
+| 2026-09-01 | **`config/evaluation.yaml` now extends `training.yaml`.** Stage 8 trains, so it needs the observation selection, the policy architecture and the PPO block, not just the simulator settings. |
+| 2026-09-01 | **`simulate()` gained `start_row`/`end_row`, and the policy is a weight source.** A trained policy wrapped as a `WeightFn` runs through the same `simulate()` as the six baselines and emits an identical `trajectory.parquet` — which is why the Stage 12 report needs no special case for it. |
 | 2026-09-01 | **Stage 7 complete.** Five curriculum rungs, warm-started in order, all five gates green with zero lock and zero feasibility violations. 582,620-parameter policy; 1.5M timesteps in 18 min at a demonstration budget. 307 tests pass in 60s. |
 | 2026-09-01 | **Observations are NOT re-normalized by `VecNormalize`** — a correction to [rl-training.md](reference/rl-training.md) §2. Measured: the fold scaler already leaves the observation at mean 0.20 / std 0.83, and **19 of the 656 dimensions are constant `pf_available` bits** that `VecNormalize` would map to exactly 0 — destroying the masks the policy reads to mask its own logits, which is the silent failure §3 names. Rewards are still normalized (log returns are ~1e-3). |
 | 2026-09-01 | **The actor head is per-asset, not a flat `Linear(trunk → K+1)`** — a second correction to §2. A flat head has separate weights per asset and voids the equivariance the shared encoder buys; `logit_i = head([e_i, context])` restores it, with a separate small head for CASH. Both the equivariance and the flat per-asset parameter count are asserted in tests rather than claimed. |

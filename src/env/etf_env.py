@@ -301,7 +301,7 @@ class ETFAllocationEnv(gym.Env):
 
     def _observe(self, dec) -> np.ndarray:
         return build_observation(
-            self.obs_spec, self.store, self._row + self._feature_offset, dec,
+            self.obs_spec, self.store, self._row + self._feature_offset, dec.ctx,
             hold_days=self.episode.hold_days if self.episode else self.sim_cfg.hold_days,
             max_drawdown=(self.episode.max_drawdown if self.episode
                           else self.sim_cfg.max_drawdown),
