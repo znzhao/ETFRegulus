@@ -1,0 +1,101 @@
+# The canonical machine-readable universe. reference/etf-universe.md is the rationale;
+# a test asserts the two ticker sets are equal.
+#
+# Read by Stage 1 (fetch) and Stage 2 (curate).
+
+calendar: XNYS
+
+# Fetch from 2003 so a 252-day feature has a full window at the 2004 study start
+# (reference/data-pipeline.md, warm-up buffer).
+history_start: "2003-01-01"
+study_start: "2004-01-02"
+
+tradable:
+  broad_equity:  [SPY, QQQ, IWM]
+  sector_equity: [XLK, XLC, XLY, XLP, XLE, XLF, XLI, XLB, XLV, XLU, XLRE]
+  treasury:      [SHY, IEF, TLT, TIP]
+  credit:        [LQD, HYG]
+  real_assets:   [GLD, DBC]
+  international: [VEA, VWO]
+
+# CASH is synthetic: zero return, zero vol, no lock, always available. It is never
+# fetched and never appears in a price frame -- it is index 0 of the action vector.
+# See reference/etf-universe.md section 7.
+synthetic_asset: CASH
+
+# Feature-only symbols. `kind` is load-bearing: a `level` series is used as a level and
+# as level differences, never as a return (reference/features.md rule 3).
+# `range` is a hard sanity band on the LEVEL, checked by the Stage 2 gate. It exists so
+# a provider-side convention change (the classic: quoting ^TNX as 42.5 for 4.25%) fails
+# the job loudly instead of dividing every rate signal by ten in silence. The bands are
+# wide enough to admit real history: VIX closed at 82.69 and VVIX at 207.59 on
+# 2020-03-16, and ^IRX closed at -0.105 on 2020-03-26 -- bills genuinely traded through
+# zero in the COVID flight to quality, so the lower bound is negative on purpose.
+feature_only:
+  "^VIX":      {kind: level, scale: 1.0, range: [0.0, 200.0],  role: equity implied volatility}
+  "^VVIX":     {kind: level, scale: 1.0, range: [0.0, 400.0],  role: vol-of-vol / tail stress}
+  "^TNX":      {kind: level, scale: 1.0, range: [-1.0, 20.0],  role: 10-year Treasury yield}
+  "^FVX":      {kind: level, scale: 1.0, range: [-1.0, 20.0],  role: 5-year Treasury yield}
+  "^IRX":      {kind: level, scale: 1.0, range: [-1.0, 20.0],  role: 13-week Treasury bill yield}
+  "DX-Y.NYB":  {kind: price, scale: 1.0, role: US dollar index}
+  "VTI":       {kind: price, scale: 1.0, role: SPY corroboration for quality check 9}
+
+# Publication lags are set from MEASURED release maxima plus a buffer, never from
+# nominal release calendars -- a calendar describes the median delay and leaks on
+# roughly half of all observations. See reference/data-pipeline.md section 3.
+fred:
+  T10Y2Y:   {freq: daily,   lag_days: 1,   kind: level, role: term spread 10y-2y}
+  T10Y3M:   {freq: daily,   lag_days: 1,   kind: level, role: term spread 10y-3m}
+  BAA10Y:   {freq: daily,   lag_days: 1,   kind: level, role: Baa credit spread over 10y}
+  AAA10Y:   {freq: daily,   lag_days: 1,   kind: level, role: Aaa credit spread over 10y}
+  DGS3MO:   {freq: daily,   lag_days: 1,   kind: level, role: 3-month T-bill}
+  T5YIE:    {freq: daily,   lag_days: 1,   kind: level, role: 5-year breakeven inflation}
+  T10YIE:   {freq: daily,   lag_days: 1,   kind: level, role: 10-year breakeven inflation}
+  UNRATE:   {freq: monthly, lag_days: 95,  kind: level, role: unemployment rate}
+  CPIAUCSL: {freq: monthly, lag_days: 95,  kind: level, role: headline CPI}
+  INDPRO:   {freq: monthly, lag_days: 110, kind: level, role: industrial production}
+
+fetch:
+  batch_size: 20            # yfinance rate-limit guard
+  batch_pause_seconds: 2.0
+  retries: 3
+  backoff_seconds: 5.0
+  incremental_days: 90      # trailing re-pull; handles retroactive dividend re-adjustment
+
+# Inception dates verified empirically against the provider's first bar, not the
+# prospectus. Stage 2 asserts the derived first_session matches within tolerance.
+inception_pins:
+  XLRE: "2015-10-08"
+  XLC:  "2018-06-19"
+  SHY:  "2002-07-22"
+  DBC:  "2006-02-03"
+inception_tolerance_sessions: 3
+
+quality:
+  max_forward_fill_sessions: 1        # >=2 consecutive missing sessions is a hard failure
+  max_macro_forward_fill_sessions: 10
+  max_abs_daily_return: 0.25          # broad tickers; flagged, not failed
+  max_abs_daily_return_volatile: 0.40 # DBC, VWO
+  volatile_tickers: [DBC, VWO]
+  split_jump_threshold: 0.40          # unexplained by a known split -> hard failure
+  default_level_range: [-1.0, 20.0]   # fallback when feature_only omits `range`
+  spy_vti_min_correlation: 0.95
+  spy_vti_correlation_window: 252
+  require_positive_volume: true
+  macro_staleness_buffer_days: 10
+
+# Any waived violation must be listed here with a reason (reference/stages.md, Stage 2).
+known_exceptions:
+  - ticker: XLRE
+    check: zero_volume
+    reason: >
+      Five zero-volume prints in XLRE's first quarter of trading (Oct 2015 - Jan 2016),
+      two of them on consecutive sessions (2015-11-25 and 2015-11-27, straddling the
+      Thanksgiving holiday). The provider's volume feed for a newly launched fund is
+      unreliable; the OHLC and both close series on those sessions are intact and pass
+      every other check. The defect therefore affects only the volume features
+      (volume_ratio_*, volume_z_*, volume_change) and only during XLRE's first ~60
+      sessions, which fall entirely inside the training window of every walk-forward
+      fold. Waived rather than dropped: excluding XLRE would remove the Real Estate
+      sector from the universe outright.
+    sessions: ["2015-10-14", "2015-11-25", "2015-11-27", "2015-12-07", "2016-01-25"]
