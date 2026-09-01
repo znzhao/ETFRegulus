@@ -240,12 +240,19 @@ def reservoir_entry(market: MarketData, st: EngineState, cfg: SimulationConfig,
 def initial_state(market: MarketData, cfg: SimulationConfig, *,
                   ledger: Ledger | None = None,
                   lock_manager: LockManager | None = None,
-                  peak: float | None = None) -> EngineState:
-    """Seed an `EngineState`, inheriting the peak rather than resetting it to the NAV."""
+                  peak: float | None = None,
+                  row: int = 0) -> EngineState:
+    """Seed an `EngineState`, inheriting the peak rather than resetting it to the NAV.
+
+    `row` is where the run begins. It is not always 0: an evaluation window that needs
+    history behind it -- a walk-forward test year, or one year of a comparison report --
+    builds `market` over the full span so lookbacks work, and starts the portfolio at the
+    first session of the window.
+    """
     led = (ledger or Ledger(cash=cfg.initial_cash)).copy()
     lm = (lock_manager or LockManager(universe=list(market.universe),
                                       scope=cfg.lock_scope)).copy()
-    first = market.prices_at(0)
+    first = market.prices_at(row)
     nav0 = led.cash + sum(led.get(t) * first.get(t, 0.0) for t in market.universe)
     return EngineState(ledger=led, lock_manager=lm,
                        peak=max(float(peak if peak is not None else nav0), nav0))

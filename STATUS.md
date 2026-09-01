@@ -11,7 +11,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Stage 6 complete — the environment is green.** Next: Stage 7, PPO training |
+| **Current stage** | **Stage 6 complete; the report format is pinned.** Next: Stage 7, PPO training |
 | **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
 | **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
@@ -36,6 +36,7 @@ to end from a clean checkout.
 | **Phase 1** | **4 — Simulator** | `s04_simulate` | **I1–I6, T1–T7, T15** | `[x]` **THE GATE — GREEN** |
 | | 5 — Baselines | `s05_run_baselines` | zero violations + 5 checks | `[x]` all six, all checks pass |
 | **Phase 2** | 6 — Env smoke test | `s06_smoke_env` | T8, T9, T14 + zero violations | `[x]` 7/7 checks, 31,500 steps, 0 violations |
+| **Phase 3** | 12 — Report *(comparison half)* | `s12_report` | allocations sum to 100, zero violations | `[~]` baseline reference report built; acceptance table awaits Stages 8–11 |
 
 **Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
 
@@ -448,5 +449,10 @@ until it is built.
 | 2026-09-01 | **The lock is what empties the risk envelope's feasible set.** With `N = 0`, `w_safe` is all cash and the fallback fires on 0.7% of steps at `D_max = 0.05`; with `N = 30` it fires on **28.5%**, though the envelope *binds* less often. The lock floors `w_safe` at holdings that carry real risk. Recorded in [reference/risk-envelope.md](reference/risk-envelope.md) §6b; it makes `infeasible_fallback` a first-class Stage 7 diagnostic and `D_max = 0.05` a cell to report separately. |
 | 2026-09-01 | **`src/sim/engine.py` extracted.** The per-step body is now shared verbatim between `simulate()` and `env.step`, so a baseline and a policy cannot drift onto different machinery — which was the whole reason for running the baselines through the simulator. Stage 4/5 behaviour is unchanged: all 108 Phase-1 tests still pass. |
 | 2026-09-01 | **Q2 closed: `n_envs = 8`, `SubprocVecEnv`** (2,844 steps/s). 8 → 16 workers buys 3.7% for twice the processes. |
+| 2026-09-01 | **The comparison report format is pinned before training**, as `scripts/s12_report.py` + `src/evaluation/{report,render,categories}.py`, with a baseline-only reference report in `artifacts/reports/baselines/`. A format settled after seeing results is a format chosen to flatter them. The RL policy becomes one more column and nothing else changes. |
+| 2026-09-01 | **Every report year is an INDEPENDENT evaluation window** (fresh capital, peak reset each January). Forced, not stylistic: on the continuous 2004–2024 run `spy_buy_hold` breached `D_max` in 2009, went 100% cash and stayed there for fifteen years — every annual cell from 2009 on would have read 0.00%. It also matches how walk-forward evaluates the policy, one model per test year, which is what makes the RL column comparable. |
+| 2026-09-01 | **Report Sharpe uses `rf = 0`.** CASH returns exactly 0.00%/day and is the agent's outside option, so raw return *is* excess return; a T-bill rate would make CASH a negative-carry asset the simulator does not model. |
+| 2026-09-01 | **Report allocation is the TIME AVERAGE of daily weights**, in pp summing to 100 across the seven `universe.yaml` categories, asserted per cell. A year-end snapshot cannot distinguish 60% equity all year from 60% in December only. |
+| 2026-09-01 | **`simulate()` takes `start_row`/`end_row`.** The decisions are bounded, the market is not, so a 252-day lookback still works on the first session of an evaluation window. Stage 8's walk-forward needs the same thing. |
 | 2026-09-01 | **Stage 6 complete.** 7/7 gate checks, 31,500 random-policy steps, zero invariant violations; 260 tests pass in 58s. |
 | 2026-09-01 | **A drawdown ceiling against a never-resetting peak is far harsher than the same ceiling per fold.** Stage 8 and Stage 12 must state which convention a result used; the two are not comparable. |

@@ -165,6 +165,8 @@ def simulate(
     initial_ledger: Ledger | None = None,
     initial_lock_manager: LockManager | None = None,
     initial_peak: float | None = None,
+    start_row: int = 0,
+    end_row: int | None = None,
 ) -> SimulationResult:
     """Run the full trajectory. Deterministic given `cfg.seed`.
 
@@ -179,15 +181,25 @@ def simulate(
     if T < 2:
         raise ValueError("a simulation needs at least two sessions")
 
+    # `start_row`/`end_row` bound the DECISIONS, not the market. The strategy still sees
+    # the whole of `market`, so a 252-day lookback works on the first session of an
+    # evaluation window instead of silently returning nothing.
+    last = (T - 1) if end_row is None else min(int(end_row), T - 1)
+    if not 0 <= start_row < last:
+        raise ValueError(
+            f"start_row={start_row} and end_row={end_row} leave no sessions to simulate "
+            f"(market has {T})")
+
     st = initial_state(market, cfg, ledger=initial_ledger,
-                       lock_manager=initial_lock_manager, peak=initial_peak)
+                       lock_manager=initial_lock_manager, peak=initial_peak,
+                       row=start_row)
 
     rows: list[dict] = []
     reservoir: list[dict] = []
     n_lock_violations = 0
     n_feasibility_violations = 0
 
-    for i in range(T - 1):
+    for i in range(start_row, last):
         dec = observe(market, st, cfg, i, envelope=envelope)
 
         if cfg.reservoir_every and i % cfg.reservoir_every == 0 and i > 0:
