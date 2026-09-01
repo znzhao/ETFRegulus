@@ -56,10 +56,18 @@ projection:
   alpha_tolerance: 1.0e-3 # bisection tolerance on the de-risking scan (~10 risk evaluations)
 
 risk:
-  # PENDING CALIBRATION (open question Q1). These are starting values, to be resolved
-  # empirically in Stage 5 against the equal_weight and spy_tlt_60_40 baselines
-  # (reference/risk-envelope.md section 7). Do not treat them as settled.
-  quantile: 0.01
+  # CALIBRATED 2026-09-01 in Stage 5 (open question Q1 -- now closed). Chosen over 20
+  # annual windows x 6 candidates x 2 baselines x 5 D_max; the table lives in the run's
+  # `calibration.parquet` and the verdict in `baseline_summary.json`.
+  #
+  # Selected by DESIGN CONSTRAINT, with return only as a tie-break. A 2-day horizon
+  # returned +8.45% against this setting's +7.92%, and was rejected: tuning the risk
+  # layer on return is precisely the failure the envelope exists to prevent, and 0.5pp
+  # across 20 folds is inside the noise.
+  #
+  # Resulting behaviour at the primary D_max = 0.15: mean fold intervention 0.062,
+  # quiet in calm years and biting in the crises (2008 0.29, 2020 0.37, 2022 0.50).
+  quantile: 0.05          # calibrated (was 0.01)
   horizon_days: 5         # must exceed one day: the constraint has to survive the
                           # overnight gap plus a few sessions, because the lock may
                           # prevent reacting
@@ -67,6 +75,11 @@ risk:
   aggregation: max        # {max, mean, quantile} -- `max` is the conservative default,
                           # and the right one for a hard constraint
   intervention_rate_ceiling: 0.50   # above this the envelope is over-calibrated
+
+  # Only `cvar` is valid with the analytic projection backend: it is convex in `w`, which
+  # is what makes the de-risking bisection sound. `var` is not convex and is a reporting
+  # statistic only. See reference/risk-envelope.md section 5.
+  measure: cvar
 
   estimators: [rolling, block_bootstrap, crisis_windows]
 

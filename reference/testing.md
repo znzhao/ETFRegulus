@@ -76,7 +76,7 @@ Beyond the six, because the design has surfaces they do not cover:
 | T2 | Ledger + lock manager dict round-trip is lossless | D4 requirement, cheap now, expensive to retrofit | `tests/portfolio/test_serialization.py` |
 | T3 | Projection idempotence: feasible in → identical out | Catches projections that perturb valid actions | `tests/constraints/test_projection.py` |
 | T4 | Analytic vs CVXPY oracle: feasible, objective within tolerance, 10k random instances | D3's correctness guarantee | same |
-| T5 | Risk monotonicity: `stress_loss(w(alpha))` non-increasing as `alpha → 0` | The `alpha` bisection is invalid without it | `tests/constraints/test_risk_envelope.py` |
+| T5 | Risk **convexity** along `w(alpha)`, plus the pinned non-monotone counter-example and the proof that the projection never returns an infeasible action | The `alpha` bisection needs a convex sublevel set, not monotonicity — see [risk-envelope.md](risk-envelope.md) §5 | `tests/constraints/test_risk_envelope.py` |
 | T6 | Fallback always returns a feasible point or flags market-forced; never raises | Terminating the episode is forbidden | same |
 | T7 | No silent repair: diagnostics non-empty whenever `a_proj != a_raw` | Explicitly prohibited | `tests/constraints/test_projection.py` |
 | T8 | Reset sampler produces only reachable states, and `D_t <= D_max` in normal mode | Reachable-state requirement | `tests/env/test_reset_sampler.py` |

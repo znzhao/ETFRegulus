@@ -183,11 +183,15 @@ If `sum(w_lower) > 1`, the free budget is zero and `w = w_lower`, renormalized �
 w(alpha) = alpha * w  +  (1 - alpha) * w_safe
 ```
 
-where `w_safe` holds every locked position at its floor and puts everything else in cash — the least-risk
-portfolio still reachable under the lock. Bisect on `alpha ∈ [0, 1]` for the largest feasible value, to a
-configured tolerance (default 1e-3, ~10 risk evaluations). `Risk` is monotone non-increasing in the shift
-toward cash for every estimator used ([risk-envelope.md](risk-envelope.md)), which is what makes the bisection
-valid — and that monotonicity is itself asserted in a test.
+where `w_safe` holds every locked position at its floor and puts everything else in cash — the **minimum-
+exposure** portfolio still reachable under the lock. Bisect on `alpha ∈ [0, 1]` for the largest feasible value,
+to a configured tolerance (default 1e-3, ~10 risk evaluations).
+
+What makes the bisection valid is that `Risk` is **convex** in `w`, so the feasible set along the segment is an
+interval, and `w_safe` being feasible puts `alpha = 0` inside it. It is *not* validated by monotonicity: see
+the correction in [risk-envelope.md](risk-envelope.md) §5 — `w_safe` minimizes exposure, not risk, so moving
+toward it can genuinely increase risk when a hedge is available. Convexity is asserted in a test, and the
+projector re-checks feasibility after the bisection regardless.
 
 This is a feasible point close to the proposal, not the provably closest one under the risk constraint. That
 approximation is the acknowledged cost of D3.
@@ -231,6 +235,6 @@ Stage 7.
 | P2 | Locked lower bounds are never violated, in share space, at execution |
 | P3 | If `a_raw` is already feasible, `a_proj == a_raw` exactly (projection is idempotent on feasible points) |
 | P4 | Analytic vs CVXPY: feasible, and objective within tolerance, over 10k random instances |
-| P5 | `Risk(w(alpha))` is monotone non-increasing as `alpha -> 0`, for every estimator |
+| P5 | `Risk` is **convex** along `w(alpha)` (the bisection's actual requirement); the non-monotone counter-example is pinned, and `var` is shown non-convex and therefore barred from the analytic backend |
 | P6 | The fallback always returns a feasible point, or flags a market-forced violation — never raises |
 | P7 | Diagnostics are non-empty whenever `a_proj != a_raw` (no silent repair) |

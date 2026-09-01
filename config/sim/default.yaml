@@ -1,0 +1,23 @@
+# Stage 4 -- the deterministic simulator.
+#
+# Inherits the hard constraints from config/constraints.yaml so the simulator, the
+# baselines and (later) the environment cannot disagree about what N and D_max mean.
+extends: constraints.yaml
+
+universe_config: config/universe.yaml
+
+simulation:
+  start: "2004-01-02"
+  end: null                 # null -> the last curated session
+  initial_cash: 1000000.0
+  # Defaults are the D16 / D-max primaries; --hold-days and --max-drawdown override.
+  hold_days: 30
+  max_drawdown: 0.15
+  risk_enabled: true
+  risk_lookback: 756        # ~3 years of visible history for the stress estimators
+
+  # The weight source. A built-in baseline name, or `weights_file` for a parquet
+  # sequence indexed by session with one column per tradable ticker.
+  strategy: equal_weight
+  weights_file: null
+  strategy_params: {}

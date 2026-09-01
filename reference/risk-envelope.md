@@ -161,10 +161,34 @@ class RiskEnvelope:
     def is_feasible(self, w, market_state, nav, peak, d_max) -> bool: ...
 ```
 
-**Required property, asserted in tests:** `stress_loss` must be monotone non-increasing as weight shifts from
-risky assets to cash. The `alpha` bisection in the projection depends on it
-([feasibility-projection.md](feasibility-projection.md) §4.2, test P5). An estimator that violates monotonicity
-cannot be used with the analytic backend, and the test says so explicitly rather than failing mysteriously.
+**Required property, asserted in tests: `stress_loss` must be CONVEX in `w`.**
+
+> **Correction (2026-09-01).** This section previously required `stress_loss` to be *monotone* non-increasing
+> as weight shifts toward `w_safe`. **That requirement is false, and it is not what the projection needs.**
+>
+> It is false because `w_safe` minimizes **exposure**, not **risk**. A book holding a locked position *plus an
+> anti-correlated hedge* can be far safer than the same locked position plus cash. Measured on a constructed
+> pair: `w_safe` scored 0.0605 against 0.0088 for the hedged book — a factor of seven the wrong way. Any
+> universe containing SPY and TLT, or IEF and HYG, has this structure.
+>
+> What the `alpha` bisection actually needs is that the feasible set along the segment `w(alpha)` be an
+> **interval containing `alpha = 0`**. Convexity delivers exactly that: every sublevel set of a convex function
+> on a segment is an interval, and `w_safe` being feasible puts 0 inside it. No monotonicity is required, and
+> the bisection is valid without it.
+
+Consequences, all enforced:
+
+- **`measure: cvar` is the default and the only measure valid with the analytic backend.** Empirical CVaR with
+  a fractional tail weight (Rockafellar–Uryasev) is exactly convex in `w`; `max` and `mean` of convex functions
+  are convex, so the aggregate is too.
+- **`measure: var` is a reporting statistic, not a constraint.** A raw sample quantile is not convex — measured
+  violation ~1e-3, the same order as the risk budget itself.
+- The projector **re-checks feasibility after the bisection** and degrades to `w_safe` if it is ever violated,
+  so a non-convex estimator wired in later cannot silently return an infeasible action.
+
+Tested in `tests/constraints/test_risk_envelope.py`: convexity along the segment, the non-monotone
+counter-example, VaR's non-convexity, and — the property that actually matters downstream — that the
+projection never returns an infeasible action when a feasible one was reachable.
 
 ---
 
@@ -197,6 +221,30 @@ off directly:
 the envelope across the `D_max` grid and record, per setting: realized max drawdown, intervention rate, and
 average cash weight. Pick parameters where a tighter `D_max` measurably reduces realized drawdown while the
 intervention rate stays under a configured ceiling (default 50%).
+
+> ### Calibrate over ANNUAL windows, not one long path — corrected 2026-09-01
+>
+> Measured on the full 2004–2024 path, the intervention rate came out at **0.774 for every candidate in the
+> grid**, barely moving as `quantile`, `horizon_days` or `aggregation` changed. The reason is structural, not
+> a tuning failure: on a single 21-year path the running peak **never resets**, so a `D_max = 0.15` breach in
+> 2008 is never recovered from — the portfolio is held in capital preservation and cannot rebuild. The
+> correlation between "the envelope intervened" and "the drawdown was already past `D_max`" measured
+> **0.9984**. The number was reporting *time under water*, not calibration, and no choice of estimator
+> parameters could have changed it.
+>
+> The fix is to calibrate over windows that match how the policy is actually used: training episodes are
+> 63–504 sessions with a peak inherited from the sampled state, and evaluation folds are one year
+> ([evaluation.md](evaluation.md) §1). Over annual windows the same default envelope gives:
+>
+> | | mean | median | 2008 | 2020 | 2022 |
+> |---|---|---|---|---|---|
+> | intervention rate | **0.070** | 0.000 | 0.294 | 0.365 | 0.504 |
+>
+> — quiet in calm years and biting precisely in the crises, which is what a working envelope looks like.
+>
+> **Consequence to carry into Stage 8 and 12.** A drawdown ceiling measured against a peak that never resets
+> is a materially harsher constraint than the same ceiling measured per fold. Any long-horizon result must
+> say which convention it used, and the two must never be compared directly.
 
 This calibration is cheap, uses no RL, and is the difference between a safety layer that works and one that is
 either ornamental or paralyzing. Record the chosen values and the table that justified them in

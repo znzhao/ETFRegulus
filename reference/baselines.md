@@ -57,11 +57,20 @@ Notes:
 - **This makes it a control.** B1's results must be *identical* across every value of `N`. If they are not,
   the lock manager is corrupting state it should not touch — a high-value invariant, and it is asserted as a
   test.
-- **Risk envelope interaction:** the envelope can never force a sale (it only constrains *increases*, and
-  capital-preservation mode caps positions at current levels). So B1 is also unaffected by `D_max`, and its
-  realized drawdown is simply SPY's — which will exceed a tight `D_max` in 2008 and 2020. That is expected,
-  correct, and a clean example of a **market-forced** violation ([evaluation.md](evaluation.md) §4) rather
-  than a preventable one.
+- **Risk envelope interaction — corrected 2026-09-01.** This section previously claimed the envelope "can
+  never force a sale (it only constrains *increases*)", and therefore that B1 was unaffected by `D_max`.
+  **That is wrong, and the implementation is right.** Two layers must not be conflated:
+  - **Capital preservation** ([risk-envelope.md](risk-envelope.md) §2) caps every position at its current
+    *share count*. It genuinely never forces a sale.
+  - **The action-level risk budget** ([risk-envelope.md](risk-envelope.md) §3) constrains `L_stress(w)` for
+    the proposed portfolio **itself**, not the change in it. 100% SPY is a high-stress portfolio, so under a
+    tight `D_max` the de-risking scan will reduce it. That is the envelope working as specified.
+
+  So **B1 is a control for `N`, not for `D_max`.** Its `N`-invariance is what proves lock isolation and it
+  remains asserted. Under `D_max` it de-risks like anything else, and with the envelope disabled it is
+  trivially `D_max`-invariant — both are tested. Its unconstrained realized drawdown is simply SPY's, which
+  exceeds a tight `D_max` in 2008 and 2020: a clean example of a **market-forced** violation
+  ([evaluation.md](evaluation.md) §4) rather than a preventable one.
 
 ---
 
@@ -101,8 +110,27 @@ different *risk* profile from B1/B3, not just a different return stream, which i
   ETF for `N` calendar days. At `N = 30` roughly every position is still locked at the next rebalance; at
   `N = 90` the strategy is largely frozen and degenerates toward buy-and-hold of whatever it first bought.
   **B2 is therefore the most informative baseline for `N` sensitivity** ([robustness.md](robustness.md) §1.2),
-  because its performance should degrade visibly and monotonically as `N` grows. If it does not, the lock is
-  not actually binding, and that is a bug worth catching before it hides inside a trained policy.
+  because its performance degrades visibly as `N` grows. If it does not, the lock is not actually binding, and
+  that is a bug worth catching before it hides inside a trained policy.
+
+  > **Correction (2026-09-01): "monotonically" is too strong, and is not what is gated.**
+  > Measured over 2004–2024 with the envelope disabled, so the lock is isolated:
+  >
+  > | `N` | 0 | 15 | 30 | 60 | 90 | 180 |
+  > |---|---|---|---|---|---|---|
+  > | turnover | 111.6 | 7.53 | 5.14 | 3.49 | 5.08 | 3.79 |
+  > | final NAV (from 1.0M) | 5.16M | 1.12M | 1.09M | 1.22M | 1.21M | 1.04M |
+  >
+  > The effect is overwhelming and it is almost entirely the `0 → N>0` transition: turnover falls **21.7x**
+  > and terminal wealth **4.2x** the moment any lock exists. Beyond that the curve is noisy, because the lock
+  > interacts with a *discrete* monthly rebalance calendar — at `N = 60` the strategy skips a rebalance it
+  > would have made at `N = 30`, and whether that skip helps or hurts is path-dependent, not monotone.
+  >
+  > Stage 5 therefore gates two properties that the data actually supports:
+  > 1. **the lock binds hard** — turnover at `N = 0` exceeds turnover at the smallest positive `N` by >3x;
+  > 2. **turnover trends down in `N`** — Spearman rho ≤ −0.5 across the control set (measured −0.83).
+  >
+  > Gating strict monotonicity would have failed on correct behaviour, which is worse than not gating it.
 - **B2 sits exactly on the D16 boundary.** 30 calendar days is ~21 sessions, and a monthly rebalance is also
   ~21 sessions, so at the primary `N = 30` the unlock date lands almost precisely on the next rebalance. B2 is
   therefore the most sensitive baseline in the set to the operating range: a small change in `N` flips it

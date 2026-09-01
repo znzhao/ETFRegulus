@@ -144,7 +144,7 @@ Worth writing down before generating results that will be tempting to over-read:
 | "Under `D_max = 0.10`, realized drawdown stayed under 10% in 8 of 9 test years; the exception was market-forced with locked exposure of X%" | "The system guarantees a 10% maximum drawdown" |
 | "Across 1000 stationary-bootstrap replicates, annualized return had a 90% band of [a, b]" | "Expected return is the bootstrap mean" |
 | "In the constructed correlation-spike scenario the policy lost X%" | "Worst case is X%" |
-| "Performance degrades gracefully as `N` increases from 0 to 180, with `N > 60` out-of-distribution" | "The system is robust to any holding constraint" |
+| "Performance degrades gracefully as `N` increases from 0 to 180, with `N > 60` out-of-distribution; the trend is decreasing but not strictly monotone" | "The system is robust to any holding constraint" |
 
 The core thesis applies here: the hard part of this problem was never PPO versus SAC. It is whether the
 constraint machinery is correct and whether its limitations are stated honestly.

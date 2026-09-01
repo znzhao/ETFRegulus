@@ -11,11 +11,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Phase 0 complete.** Next: Stage 4 — the deterministic simulator |
-| **Run this** | `python -m scripts.s04_simulate --config config/sim/default.yaml` *(not yet written)* |
-| **Next gate** | Stage 4 — no RL code before it is green |
+| **Current stage** | **Phase 1 complete — Stage 4 is GREEN.** Next: Stage 6, the env smoke test |
+| **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
+| **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
-| **Test suite** | 99 passed, 1 deselected (`network`), 4.4s — `.venv/Scripts/python.exe -m pytest -q` |
+| **Risk envelope** | **Calibrated** (Q1 closed): `quantile 0.05, horizon 5, aggregation max, measure cvar` |
+| **Test suite** | 217 passed, 1 deselected (`network`), 52s — `.venv/Scripts/python.exe -m pytest -q` |
 | **Last updated** | 2026-09-01 |
 
 ---
@@ -116,45 +117,108 @@ prints). All were fixed at the source; none were fixed by loosening the check.
 
 ---
 
-## Phase 1 — Deterministic core  ← the critical path
+## What Phase 1 caught
 
-### `[ ]` Stage 4 — Deterministic simulator · `python -m scripts.s04_simulate --config config/sim/default.yaml`
+Five defects, and **three of them are errors in the specification itself** rather than in the
+code. Each is corrected in the reference doc it came from, with the measurement that settled it.
 
-**This is the gate. No RL code exists until every box here is checked.**
+| # | Finding | Why it mattered | Resolution |
+|---|---|---|---|
+| 1 | **Capital preservation capped *weights*, not share counts** | In a falling market "hold yesterday's weight" is an instruction to buy the dip every session — the exact increase in risky exposure the mode forbids. Cash leaked from 30% back to 0% through the 2008 drawdown, and realized drawdown was *higher* with the safety layer on (0.415) than off (0.364) | Capped in **share space at execution**, like the lock floor. Realized drawdown is now monotone in `D_max`, which is Stage 9's gate |
+| 2 | **`stress_loss` monotonicity is false** ([risk-envelope.md](reference/risk-envelope.md) §5 required it) | `w_safe` minimizes *exposure*, not *risk*. With a locked position and an anti-correlated hedge available, `w_safe` measured **0.0605 against 0.0088** — seven times riskier than the book it was meant to de-risk toward. Any universe with SPY and TLT has this structure | The bisection actually needs **convexity**, which CVaR has and VaR does not (violation ~1e-3). `measure: cvar` is now the only measure valid with the analytic backend, and the projector re-checks feasibility regardless |
+| 3 | **The envelope calibration procedure was wrong** ([risk-envelope.md](reference/risk-envelope.md) §7) | Run on one 21-year path, the intervention rate came out at 0.774 for *every* candidate, with a **0.9984 correlation to "already breached"** — it was measuring time-under-water, not calibration, because the peak never resets. No parameter choice could have changed it | Calibrate over **annual windows**, matching how the policy is trained and evaluated. Same envelope then gives mean intervention **0.070**, spiking at 2008 (0.29), 2020 (0.37), 2022 (0.50) |
+| 4 | **Every rebalancing baseline was trading daily** | `rebalance: monthly` was implemented as "re-assert the target weights every session". Prices drift, so that is a daily instruction to trade back — which relocked every position every day and made the lock appear to bind at values of `N` where it should not | Baselines now `_hold()` between rebalance dates, asking for exactly what is held so no trade leg is generated |
+| 5 | **`equal_weight` silently ignored new listings** | With 24 names at ~4.2% each, an ETF entering at weight 0 is only a 4.2pp deviation and never trips the 5pp drift band. B5 quietly stopped tracking the expanding universe — the one thing it exists to exercise | A change in the *available set* is a structural change, not drift, and rebalances regardless of the band |
 
-- [ ] `Ledger`: fractional shares, cash, long-only, dict round-trip
-- [ ] Execution: next-open, sells-then-buys, `cost_bps` parameter set to 0.0, price-in-range check
-- [ ] **Total-return NAV via dividend reinvestment** ([reference/portfolio-ledger.md](reference/portfolio-ledger.md) §3)
-- [ ] NAV, running peak, drawdown
-- [ ] `LockManager`: all four transitions + dividend carve-out
-- [ ] Availability / inception masking
-- [ ] Analytic projection: simplex with lower bounds + `alpha` de-risk scan
-- [ ] CVXPY backend (as test oracle at minimum)
-- [ ] Risk envelope: rolling stress, block bootstrap, date-filtered crisis library
-- [ ] Capital-preservation mode and the infeasibility fallback
-- [ ] Reward `log(V_{t+1}/V_t)`
-- [ ] `trajectory.parquet` writer matching the documented schema
-- [ ] **Gate:** I1–I6, T1–T7, T15 all green
-
-### `[ ]` Stage 5 — Baselines · `python -m scripts.s05_run_baselines --config config/evaluation.yaml`
-
-Specs: [reference/baselines.md](reference/baselines.md)
-
-- [ ] **B1 `spy_buy_hold`** — buy SPY session 1, never trade again
-- [ ] **B2 `momentum`** — 12-1 cross-sectional, top-5 equal weight, monthly, absolute filter
-- [ ] **B3 `spy_tlt_60_40`** — 60/40, monthly, 5pp drift band
-- [ ] B4 `cash` · B5 `equal_weight` · B6 `classical_optimizer` (required by the acceptance criteria)
-- [ ] All six through the identical simulator + constraint layer
-- [ ] Standard metrics computed for each
-- [ ] **Risk-envelope calibration** ([reference/risk-envelope.md](reference/risk-envelope.md) §7) — record the table
-- [ ] Initial-state reservoir populated for the Stage 5 reset sampler
-- [ ] **Gate:** zero lock/feasibility violations across all six, plus the four simulator checks —
-      `cash` zero drawdown/turnover · `spy_buy_hold` identical across all `N` · `momentum` degrades
-      monotonically in `N` · `spy_tlt_60_40` shows a severe 2022 drawdown
+Two further spec claims were corrected from measurement: `momentum` degrades **in trend**
+rather than strictly monotonically in `N` (the effect is overwhelmingly the `0 → N>0`
+transition; beyond it a discrete rebalance calendar makes it path-dependent), and
+`spy_buy_hold` is a control for `N` **but not for `D_max`** — the action-level budget
+constrains the proposed portfolio itself, not merely increases in it.
 
 ---
 
-## Phase 2 — Environment and RL  `[!]` blocked until Stage 4 is `[x]`
+## Phase 1 — Deterministic core  ← the critical path
+
+### `[x]` Stage 4 — Deterministic simulator · `python -m scripts.s04_simulate --config config/sim/default.yaml`
+
+**THE GATE — GREEN.** 5,702 sessions, 24 tradables + CASH, zero lock and zero feasibility
+violations. ~0.5 ms/step without the envelope, ~1.6 ms/step with it (relevant to Q2).
+
+- [x] `Ledger`: fractional shares, cash, long-only, dict round-trip
+- [x] Execution: next-open, sells-then-buys, `cost_bps` parameter set to 0.0, price-in-range check
+- [x] **Total-return NAV via dividend reinvestment** ([reference/portfolio-ledger.md](reference/portfolio-ledger.md) §3)
+- [x] NAV, running peak, drawdown — peak inherited across reset, never set to current NAV
+- [x] `LockManager`: all four transitions + dividend carve-out (structural: reinvestment
+      routes through `accrue_shares`, which emits no trade leg, so the lock cannot see it)
+- [x] Availability / inception masking
+- [x] Analytic projection: **box-constrained** simplex (lower *and* upper bounds) + `alpha` de-risk scan
+- [x] CVXPY backend, used as the correctness oracle from day one
+- [x] Risk envelope: rolling stress, stationary block bootstrap, date-filtered crisis library
+- [x] Capital-preservation mode and the infeasibility fallback
+- [x] Reward `log(V_{t+1}/V_t)`
+- [x] `trajectory.parquet` writer matching the documented schema
+- [x] **Gate:** I1–I6, T1–T7, T15 all green
+
+> **T1 against the real ledger:** buy-and-hold each of the 24 tradables from inception to
+> today and the NAV reproduces `close_adj` to **≤9.6e-4**; GLD exactly 0.0. The lock
+> invariants are property-tested with `hypothesis` over random buy/sell/hold sequences,
+> including the sell-then-rebuy-same-day case that fixed fixtures miss.
+
+### `[x]` Stage 5 — Baselines · `python -m scripts.s05_run_baselines --config config/evaluation.yaml`
+
+Specs: [reference/baselines.md](reference/baselines.md). All six through the identical
+simulator and constraint layer, **zero violations**, all five acceptance checks pass.
+
+- [x] **B1 `spy_buy_hold`** — buy SPY session 1, never trade again
+- [x] **B2 `momentum`** — 12-1 cross-sectional, top-5 equal weight, monthly, absolute filter
+- [x] **B3 `spy_tlt_60_40`** — 60/40, monthly, 5pp drift band
+- [x] B4 `cash` · B5 `equal_weight` · B6 `classical_optimizer` (required by the acceptance criteria)
+- [x] All six through the identical simulator + constraint layer
+- [x] Standard metrics computed for each
+- [x] **Risk-envelope calibration** ([reference/risk-envelope.md](reference/risk-envelope.md) §7) — **Q1 CLOSED**
+- [x] Initial-state reservoir populated — 1,506 states, reachable by construction
+- [x] **Gate:** zero lock/feasibility violations across all six, plus the simulator checks
+
+2004-01-02 .. 2024-12-31 at `N=30`, `D_max=0.15`, frictionless:
+
+| baseline | final NAV | ann. | maxDD | Sharpe | cash |
+|---|---|---|---|---|---|
+| `classical_optimizer` | 4,124,908 | +6.99% | 0.175 | +0.95 | 0.03 |
+| `spy_buy_hold` | 1,270,697 | +1.12% | 0.153 | +0.20 | 0.80 |
+| `spy_tlt_60_40` | 1,133,649 | +0.58% | 0.262 | +0.10 | 0.77 |
+| `equal_weight` | 1,123,152 | +0.54% | 0.284 | +0.10 | 0.77 |
+| `momentum` | 1,025,056 | +0.12% | 0.295 | +0.02 | 0.83 |
+| `cash` | 1,000,000 | 0.00% | 0.000 | 0.00 | 1.00 |
+
+> **Read these with the peak caveat below.** Over a single 21-year path the peak never
+> resets, so a 2008 breach of `D_max = 0.15` is never recovered from and most baselines sit
+> in capital preservation for most of the sample — hence the ~0.8 cash weights and the poor
+> returns. These are *not* comparable to per-fold numbers, and Stage 8 must report which
+> convention it used.
+
+**Acceptance checks — all pass:**
+
+| check | result |
+|---|---|
+| `cash` exactly zero drawdown and turnover | 0.0 / 0.0 |
+| `spy_buy_hold` identical across `N ∈ {0,30,90,180}` | max NAV difference **0.0** |
+| `momentum` lock binds hard | turnover ratio unlocked:locked **21.7x** |
+| `momentum` turnover trends down in `N` | Spearman **−1.0** |
+| `spy_tlt_60_40` severe 2022 drawdown | **0.186** |
+
+**Q1 calibration (closed).** 6 candidates × 2 baselines × 5 `D_max` × 20 annual windows.
+Chosen **`quantile 0.05, horizon 5, aggregation max`** — by design constraint, with return
+only as a tie-break. Realized drawdown responds correctly to the ceiling:
+
+| `D_max` | 0.05 | 0.10 | 0.15 | 0.20 | 0.25 |
+|---|---|---|---|---|---|
+| realized maxDD | 0.067 | 0.082 | 0.091 | 0.095 | 0.096 |
+| intervention rate | 0.389 | 0.157 | 0.056 | 0.034 | 0.017 |
+
+---
+
+## Phase 2 — Environment and RL  `[x]` **UNBLOCKED** — Stage 4 is green
 
 ### `[ ]` Stage 6 — Env smoke test · `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500`
 
@@ -245,8 +309,8 @@ Spec in [reference/stages.md](reference/stages.md). The only requirement it plac
 
 | # | Question | Blocks | Status |
 |---|---|---|---|
-| Q1 | Risk-envelope calibration values (`quantile`, `horizon_days`, `block_length`, `aggregation`) | Stage 7 quality | Resolve empirically in Stage 5 |
-| Q2 | Worker count / vectorization strategy | Stage 7 throughput | Resolve from the Stage 6 benchmark |
+| ~~Q1~~ | ~~Risk-envelope calibration values~~ | — | **CLOSED 2026-09-01.** `quantile 0.05, horizon 5, aggregation max, measure cvar`, calibrated over 20 annual windows; written into `config/constraints.yaml` |
+| Q2 | Worker count / vectorization strategy | Stage 7 throughput | Resolve from the Stage 6 benchmark. **Stage 4 measured ~1.6 ms/step with the envelope on** (~625 steps/s single-threaded), and the envelope is ~two-thirds of it — so env stepping, not the network, is the bottleneck, as D5 assumed |
 | Q5 | Does `device: cpu` still win on the real env and at high worker counts? Margin is only **1.2x** | Stage 7 wall clock | Confirm in Stage 6; re-run on any architecture change |
 | Q3 | Does `proj_distance` decline without an auxiliary penalty? | Whether D9 mitigation 3 is needed | Observe in Curriculum stage 2–3 |
 | Q4 | Is the 3×3 stress grid sufficient, or is the full 7×5 needed? | Stage 9 runtime | Decide after Stage 8 timing is known |
@@ -275,3 +339,9 @@ Spec in [reference/stages.md](reference/stages.md). The only requirement it plac
 | 2026-09-01 | **`ret_w` and `logret_w` are both kept** (|r| ≈ 0.98-1.00). Ranks want arithmetic, volatility wants log. The redundancy is now *visible* in the correlation diagnostic rather than accidental, per [reference/features.md](reference/features.md) §1 — a decision, not an accident. Revisit at observation-selection time (Q6). |
 | 2026-09-01 | **Publication lag verified end to end.** April 2020's 14.8% UNRATE print first becomes visible on session 2020-07-06 (obs + 95d), against a real release of 2020-05-08 — conservatively late, which is the safe direction. |
 | 2026-08-31 | **D14:** GPU resolved. RTX 3060 Ti verified working with `torch==2.13.0+cu126`. Benchmarked end-to-end PPO at CPU 2.35s vs CUDA 6.44s → **`training.device: cpu`**. GPU wins raw matmul 8.6x but loses the real job 2.7x; rollout transfer latency dominates. See [reference/gpu-setup.md](reference/gpu-setup.md). |
+| 2026-09-01 | **Phase 1 complete.** Stage 4 green (the gate) and Stage 5 green; 217 tests pass in 52s. Zero lock and zero feasibility violations across all six baselines and every simulator run. |
+| 2026-09-01 | **Capital preservation caps SHARE COUNTS, not weights.** A weight cap reads as "restore yesterday's weight", which in a falling market is an instruction to buy the dip daily. Enforced at execution alongside the lock floor — the weight bound is the optimizer's guide, the share bound is the law. Realized drawdown is now monotone in `D_max`. |
+| 2026-09-01 | **Convexity replaces monotonicity as the risk-envelope requirement.** `w_safe` minimizes exposure, not risk (measured 7x riskier than a hedged book), so [risk-envelope.md](reference/risk-envelope.md) §5's monotonicity premise is false. The alpha bisection needs a convex sublevel set; `measure: cvar` provides it, `var` does not. |
+| 2026-09-01 | **The envelope is calibrated over ANNUAL windows.** On one 21-year path the intervention rate measures time-under-water (0.9984 correlation to "already breached") because the peak never resets. Corrected in [risk-envelope.md](reference/risk-envelope.md) §7. |
+| 2026-09-01 | **Q1 closed:** `quantile 0.05, horizon_days 5, aggregation max, measure cvar`. Selected by design constraint with return as tie-break — a 2-day horizon returned +0.5pp more and was rejected, because tuning the risk layer on return is the failure the envelope exists to prevent. |
+| 2026-09-01 | **A drawdown ceiling against a never-resetting peak is far harsher than the same ceiling per fold.** Stage 8 and Stage 12 must state which convention a result used; the two are not comparable. |

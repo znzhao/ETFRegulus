@@ -238,6 +238,8 @@ class RiskSpec:
     horizon_days: int = 5
     block_length: int = 10
     aggregation: Literal["max", "mean", "quantile"] = "max"
+    #: Only `cvar` is convex in `w`, and the analytic projector's bisection needs that.
+    measure: Literal["var", "cvar"] = "cvar"
     intervention_rate_ceiling: float = 0.50
     estimators: list[str] = field(
         default_factory=lambda: ["rolling", "block_bootstrap", "crisis_windows"])
