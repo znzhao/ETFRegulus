@@ -179,27 +179,6 @@ prints). All were fixed at the source; none were fixed by loosening the check.
 
 ---
 
-## What Phase 1 caught
-
-Five defects, and **three of them are errors in the specification itself** rather than in the
-code. Each is corrected in the reference doc it came from, with the measurement that settled it.
-
-| # | Finding | Why it mattered | Resolution |
-|---|---|---|---|
-| 1 | **Capital preservation capped *weights*, not share counts** | In a falling market "hold yesterday's weight" is an instruction to buy the dip every session — the exact increase in risky exposure the mode forbids. Cash leaked from 30% back to 0% through the 2008 drawdown, and realized drawdown was *higher* with the safety layer on (0.415) than off (0.364) | Capped in **share space at execution**, like the lock floor. Realized drawdown is now monotone in `D_max`, which is Stage 9's gate |
-| 2 | **`stress_loss` monotonicity is false** ([risk-envelope.md](reference/risk-envelope.md) §5 required it) | `w_safe` minimizes *exposure*, not *risk*. With a locked position and an anti-correlated hedge available, `w_safe` measured **0.0605 against 0.0088** — seven times riskier than the book it was meant to de-risk toward. Any universe with SPY and TLT has this structure | The bisection actually needs **convexity**, which CVaR has and VaR does not (violation ~1e-3). `measure: cvar` is now the only measure valid with the analytic backend, and the projector re-checks feasibility regardless |
-| 3 | **The envelope calibration procedure was wrong** ([risk-envelope.md](reference/risk-envelope.md) §7) | Run on one 21-year path, the intervention rate came out at 0.774 for *every* candidate, with a **0.9984 correlation to "already breached"** — it was measuring time-under-water, not calibration, because the peak never resets. No parameter choice could have changed it | Calibrate over **annual windows**, matching how the policy is trained and evaluated. Same envelope then gives mean intervention **0.070**, spiking at 2008 (0.29), 2020 (0.37), 2022 (0.50) |
-| 4 | **Every rebalancing baseline was trading daily** | `rebalance: monthly` was implemented as "re-assert the target weights every session". Prices drift, so that is a daily instruction to trade back — which relocked every position every day and made the lock appear to bind at values of `N` where it should not | Baselines now `_hold()` between rebalance dates, asking for exactly what is held so no trade leg is generated |
-| 5 | **`equal_weight` silently ignored new listings** | With 24 names at ~4.2% each, an ETF entering at weight 0 is only a 4.2pp deviation and never trips the 5pp drift band. B5 quietly stopped tracking the expanding universe — the one thing it exists to exercise | A change in the *available set* is a structural change, not drift, and rebalances regardless of the band |
-
-Two further spec claims were corrected from measurement: `momentum` degrades **in trend**
-rather than strictly monotonically in `N` (the effect is overwhelmingly the `0 → N>0`
-transition; beyond it a discrete rebalance calendar makes it path-dependent), and
-`spy_buy_hold` is a control for `N` **but not for `D_max`** — the action-level budget
-constrains the proposed portfolio itself, not merely increases in it.
-
----
-
 ## Phase 1 — Deterministic core  ← the critical path
 
 ### `[x]` Stage 4 — Deterministic simulator · `python -m scripts.s04_simulate --config config/sim/default.yaml`
@@ -241,6 +220,27 @@ simulator and constraint layer, **zero violations**, all five acceptance checks 
 - [x] **Risk-envelope calibration** ([reference/risk-envelope.md](reference/risk-envelope.md) §7) — **Q1 CLOSED**
 - [x] Initial-state reservoir populated — 1,506 states, reachable by construction
 - [x] **Gate:** zero lock/feasibility violations across all six, plus the simulator checks
+
+---
+
+## What Phase 1 caught
+
+Five defects, and **three of them are errors in the specification itself** rather than in the
+code. Each is corrected in the reference doc it came from, with the measurement that settled it.
+
+| # | Finding | Why it mattered | Resolution |
+|---|---|---|---|
+| 1 | **Capital preservation capped *weights*, not share counts** | In a falling market "hold yesterday's weight" is an instruction to buy the dip every session — the exact increase in risky exposure the mode forbids. Cash leaked from 30% back to 0% through the 2008 drawdown, and realized drawdown was *higher* with the safety layer on (0.415) than off (0.364) | Capped in **share space at execution**, like the lock floor. Realized drawdown is now monotone in `D_max`, which is Stage 9's gate |
+| 2 | **`stress_loss` monotonicity is false** ([risk-envelope.md](reference/risk-envelope.md) §5 required it) | `w_safe` minimizes *exposure*, not *risk*. With a locked position and an anti-correlated hedge available, `w_safe` measured **0.0605 against 0.0088** — seven times riskier than the book it was meant to de-risk toward. Any universe with SPY and TLT has this structure | The bisection actually needs **convexity**, which CVaR has and VaR does not (violation ~1e-3). `measure: cvar` is now the only measure valid with the analytic backend, and the projector re-checks feasibility regardless |
+| 3 | **The envelope calibration procedure was wrong** ([risk-envelope.md](reference/risk-envelope.md) §7) | Run on one 21-year path, the intervention rate came out at 0.774 for *every* candidate, with a **0.9984 correlation to "already breached"** — it was measuring time-under-water, not calibration, because the peak never resets. No parameter choice could have changed it | Calibrate over **annual windows**, matching how the policy is trained and evaluated. Same envelope then gives mean intervention **0.070**, spiking at 2008 (0.29), 2020 (0.37), 2022 (0.50) |
+| 4 | **Every rebalancing baseline was trading daily** | `rebalance: monthly` was implemented as "re-assert the target weights every session". Prices drift, so that is a daily instruction to trade back — which relocked every position every day and made the lock appear to bind at values of `N` where it should not | Baselines now `_hold()` between rebalance dates, asking for exactly what is held so no trade leg is generated |
+| 5 | **`equal_weight` silently ignored new listings** | With 24 names at ~4.2% each, an ETF entering at weight 0 is only a 4.2pp deviation and never trips the 5pp drift band. B5 quietly stopped tracking the expanding universe — the one thing it exists to exercise | A change in the *available set* is a structural change, not drift, and rebalances regardless of the band |
+
+Two further spec claims were corrected from measurement: `momentum` degrades **in trend**
+rather than strictly monotonically in `N` (the effect is overwhelmingly the `0 → N>0`
+transition; beyond it a discrete rebalance calendar makes it path-dependent), and
+`spy_buy_hold` is a control for `N` **but not for `D_max`** — the action-level budget
+constrains the proposed portfolio itself, not merely increases in it.
 
 2004-01-02 .. 2024-12-31 at `N=30`, `D_max=0.15`, frictionless:
 
