@@ -275,6 +275,30 @@ class ConstructiveSampler:
                             nav=nav, drawdown=drawdown, source="constructive")
 
 
+def flat_state(market: MarketData, rng: np.random.Generator, *,
+               initial_cash: float = 1_000_000.0, window=None) -> InitialState:
+    """An all-cash start on a random session. Curriculum stages 1-4 use this.
+
+    Trivially reachable -- it is the state every simulation begins in -- and deliberately
+    boring: the early curriculum is about learning portfolio mechanics, and a randomized
+    inherited portfolio would confound that with learning to read a position it did not
+    take. The *session* is still randomized, so the policy sees the whole training window.
+    """
+    rows = np.arange(len(market.sessions) - 1)
+    if window is not None:
+        keep = ((market.sessions >= window[0]) & (market.sessions <= window[1]))[:-1]
+        rows = rows[keep]
+    if rows.size == 0:
+        raise ReachabilityError(f"no sessions in window {window}")
+    row = int(rng.choice(rows))
+    return InitialState(
+        session=market.sessions[row], ledger=Ledger(cash=float(initial_cash)),
+        lock_manager=LockManager(universe=list(market.universe)),
+        peak=float(initial_cash), nav=float(initial_cash), drawdown=0.0,
+        source="flat",
+    )
+
+
 # ------------------------------------------------------------------- composition
 
 

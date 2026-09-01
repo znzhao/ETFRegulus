@@ -63,15 +63,36 @@ def env_config_from(resolved: dict, constraints) -> EnvConfig:
     hd = constraints.lock.hold_days
     dd = constraints.drawdown.max_drawdown
     window = env.get("window")
+
+    # A curriculum rung may narrow the grid (stage 2 trains on {21, 30, 42}). Anything it
+    # does NOT name falls through to constraints.yaml, so D16's ladder is stated once.
+    # A rung that narrows the values must supply its own weights or none: silently
+    # inheriting a 5-entry weight vector for a 3-entry grid is the bug this avoids.
+    hold_values = env.get("hold_days_values", hd.values)
+    hold_weights = (env.get("hold_days_weights")
+                    if "hold_days_values" in env
+                    else env.get("hold_days_weights", hd.weights))
+    dmax_values = env.get("max_drawdown_values", dd.values)
+    dmax_weights = (env.get("max_drawdown_weights")
+                    if "max_drawdown_values" in env
+                    else env.get("max_drawdown_weights", dd.weights))
+
+    if hold_weights is not None and len(hold_weights) != len(hold_values):
+        raise ValueError(
+            f"hold_days_weights has {len(hold_weights)} entries for "
+            f"{len(hold_values)} values; a rung that narrows the grid must drop or "
+            "restate the weights rather than inherit mismatched ones")
+
     return EnvConfig(
-        hold_days_values=tuple(int(v) for v in hd.values),
-        hold_days_weights=tuple(hd.weights) if hd.weights else None,
-        max_drawdown_values=tuple(float(v) for v in dd.values),
-        max_drawdown_weights=tuple(dd.weights) if dd.weights else None,
+        hold_days_values=tuple(int(v) for v in hold_values),
+        hold_days_weights=tuple(hold_weights) if hold_weights else None,
+        max_drawdown_values=tuple(float(v) for v in dmax_values),
+        max_drawdown_weights=tuple(dmax_weights) if dmax_weights else None,
         episode_lengths=tuple(int(v) for v in env.get("episode_lengths", (63, 126, 252, 504))),
         window=(window["start"], window["end"]) if window else None,
         stress_reset=bool(env.get("stress_reset", False)),
         risk_enabled=bool(env.get("risk_enabled", True)),
+        flat_start=bool(env.get("flat_start", False)),
         strict=bool(env.get("strict", True)),
         fixed_hold_days=env.get("fixed_hold_days"),
         fixed_max_drawdown=env.get("fixed_max_drawdown"),

@@ -65,7 +65,45 @@ smoke:
 # ---------------------------------------------------------------------- Stage 7 only
 training:
   algo: ppo
-  device: cpu              # D14 -- benchmarked, not assumed. Re-checked in Stage 6.
-  n_envs: 8                # provisional; Stage 6's throughput table settles it (Q2)
-  total_timesteps: 2_000_000
+  device: cpu              # D14 -- benchmarked, not assumed. See Q5: Stage 6 found the
+                           # GPU faster on the network alone at obs_dim 656, but D14's
+                           # verdict was end-to-end, where rollout cost dominates.
+  n_envs: 8                # Q2, settled by the Stage 6 throughput table: 2,844 steps/s,
+                           # and 16 workers buys only 3.7% more for twice the processes.
+  subproc: true            # Dummy is flat in the worker count -- it steps serially.
+  total_timesteps: 2_000_000   # per curriculum stage
+  checkpoint_every: 250_000
   seed: 42
+
+# The policy architecture (rl-training.md section 2). A shared per-asset encoder AND a
+# shared per-asset head, so the network is permutation-equivariant end to end and its
+# per-asset parameter count does not grow with the universe.
+policy:
+  asset_hidden: 128        # width of the shared per-asset encoder
+  embed_dim: 64            # per-asset embedding handed to the head
+  context_dim: 128         # pooled universe + portfolio + params
+  head_hidden: 128         # shared [embedding, context] -> one logit
+  trunk: [256, 256]        # critic trunk only; the actor head is per-asset
+  mask_unavailable: true   # push unavailable assets to the action floor before the softmax
+
+# Deliberately conservative (rl-training.md section 5).
+ppo:
+  n_steps: 2048            # per env
+  batch_size: 4096
+  n_epochs: 10
+  # Q7 OPEN. Inherited from the superseded parameter range, justified by "N up to 180
+  # calendar days". Under D16 the lock is ~30 calendar days (~21 sessions), for which 0.99
+  # (~100 sessions) is already several times the constraint horizon; 0.999 is ~1000
+  # sessions, roughly four years, far longer than the longest episode (504). Left
+  # unchanged because it is a TUNED value and D16 is a specification change -- settle it
+  # on a validation year, which is the only place tuning is permitted.
+  gamma: 0.999
+  gae_lambda: 0.95
+  clip_range: 0.2
+  # Entropy matters more than usual here: a softmax over 25 assets collapses to a
+  # single-asset corner readily, and a collapsed policy looks stable while learning nothing.
+  ent_coef: 0.005
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  learning_rate: 3.0e-4
+  target_kl: 0.02

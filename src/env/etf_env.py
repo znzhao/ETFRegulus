@@ -37,7 +37,7 @@ from src.constraints.projector import FeasibilityProjector, make_projector
 from src.constraints.risk_envelope import RiskEnvelope
 from src.env.feature_store import FeatureStore
 from src.env.observation import ObservationSpec
-from src.env.reset_sampler import InitialState, ResetSampler
+from src.env.reset_sampler import InitialState, ResetSampler, flat_state
 from src.env.state_builder import build_observation
 from src.sim.engine import EngineState, advance, observe
 from src.sim.simulator import MarketData, SimulationConfig
@@ -82,6 +82,9 @@ class EnvConfig:
     window: tuple[str, str] | None = None
     stress_reset: bool = False
     risk_enabled: bool = True
+    #: Start every episode flat (all cash, no locks) instead of sampling a reachable
+    #: portfolio. Curriculum stages 1-4; stage 5 turns it off and uses the reservoir.
+    flat_start: bool = False
     initial_cash: float = 1_000_000.0
     #: Assert every invariant on every step. On in Stage 6, off in Stage 7 -- it roughly
     #: doubles the step cost, and the smoke test exists so that training does not have to
@@ -197,9 +200,15 @@ class ETFAllocationEnv(gym.Env):
             else self._sample_param(cfg.max_drawdown_values, cfg.max_drawdown_weights)))
         stress = bool(options.get("stress", cfg.stress_reset))
 
-        init: InitialState = self.sampler.sample(
-            self.np_random, hold_days=hold_days, max_drawdown=max_drawdown,
-            window=options.get("window", self._window), stress=stress)
+        window = options.get("window", self._window)
+        if bool(options.get("flat_start", cfg.flat_start)):
+            init: InitialState = flat_state(
+                self.market, self.np_random,
+                initial_cash=self.sim_cfg.initial_cash, window=window)
+        else:
+            init = self.sampler.sample(
+                self.np_random, hold_days=hold_days, max_drawdown=max_drawdown,
+                window=window, stress=stress)
 
         row = int(self.market.sessions.get_indexer([pd.Timestamp(init.session)])[0])
         if row < 0:

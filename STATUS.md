@@ -11,7 +11,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Stage 6 complete; the report format is pinned.** Next: Stage 7, PPO training |
+| **Current stage** | **Stage 7 complete — the curriculum trains and all five gates are green.** Next: Stage 8, walk-forward |
 | **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
 | **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
@@ -36,6 +36,7 @@ to end from a clean checkout.
 | **Phase 1** | **4 — Simulator** | `s04_simulate` | **I1–I6, T1–T7, T15** | `[x]` **THE GATE — GREEN** |
 | | 5 — Baselines | `s05_run_baselines` | zero violations + 5 checks | `[x]` all six, all checks pass |
 | **Phase 2** | 6 — Env smoke test | `s06_smoke_env` | T8, T9, T14 + zero violations | `[x]` 7/7 checks, 31,500 steps, 0 violations |
+| | 7 — Train PPO | `s07_train_ppo` | per-rung: beats `cash`, zero violations | `[x]` 5/5 rungs green (demonstration budget) |
 | **Phase 3** | 12 — Report *(comparison half)* | `s12_report` | allocations sum to 100, zero violations | `[~]` baseline reference report built; acceptance table awaits Stages 8–11 |
 
 **Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
@@ -284,7 +285,7 @@ only as a tie-break. Realized drawdown responds correctly to the ceiling:
 
 ---
 
-## Phase 2 — Environment and RL  `[~]` — Stage 6 is `[x]`; Stage 7 is next
+## Phase 2 — Environment and RL  `[x]` — Stages 6 and 7 are `[x]`
 
 ### `[x]` Stage 6 — Env smoke test · `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500`
 
@@ -328,20 +329,49 @@ and **21 of 99 macro** (level plus one change horizon per family). Layout
 > because it is the measured end-to-end verdict, but Stage 7 must re-run the end-to-end comparison
 > before the setting is treated as settled.
 
-### `[ ]` Stage 7 — Train PPO · `python -m scripts.s07_train_ppo --config config/experiments/ppo_stageK.yaml`
+### `[x]` Stage 7 — Train PPO · `python -m scripts.s07_train_ppo --config config/training.yaml --curriculum`
 
-- [ ] Shared per-asset encoder policy; availability masked in logits
-- [ ] `VecNormalize` fitted on training window only, frozen at eval, saved with the policy
-- [ ] D9 wiring: `a_raw` stored, `a_proj` executed, `proj_distance` logged
-- [ ] Diagnostic callbacks + baseline reference lines on TensorBoard
-- [ ] `[ ]` Curriculum 1 — `N=0`, mechanics only
-- [ ] `[ ]` Curriculum 2 — lock, `N ∈ {7,30}`
-- [ ] `[ ]` Curriculum 3 — full parameter range
-- [ ] `[ ]` Curriculum 4 — risk envelope on
-- [ ] `[ ]` Curriculum 5 — fully randomized + reservoir resets
-- [ ] **Gate per stage:** beats `cash`, zero lock/feasibility violations
+- [x] Shared per-asset encoder policy; availability masked in logits — **and a shared per-asset
+      *head* too**, a correction: the specified flat `Linear(trunk → K+1)` has separate weights per asset
+      and throws away the equivariance the encoder buys. 582,620 parameters
+- [x] Normalization fitted on the training window only, frozen at eval, saved with the policy —
+      **rewards only**; see the correction below
+- [x] D9 wiring: `a_raw` stored, `a_proj` executed, `proj_distance` logged
+- [x] Diagnostic callbacks + baseline reference lines on TensorBoard
+- [x] Curriculum 1 — `N=0`, mechanics only
+- [x] Curriculum 2 — lock, `N ∈ {21, 30, 42}` *(the plan said `{7,30}`; D16 moved the operating range)*
+- [x] Curriculum 3 — full parameter range
+- [x] Curriculum 4 — risk envelope on
+- [x] Curriculum 5 — fully randomized + reservoir resets
+- [x] **Gate per stage:** beats `cash`, zero lock/feasibility violations — 5/5 passed
 
-### `[ ]` Stage 8 — Walk-forward · `python -m scripts.s08_walk_forward --config config/evaluation.yaml`
+**Demonstration run: 300k timesteps per rung (1.5M total, 18 min), all five gates green.**
+
+| Rung | ep. log return | proj. distance | cash w | steps/s | gate |
+|---|---|---|---|---|---|
+| 1 mechanics | +0.0667 | 0.073 | 0.039 | 2,306 | PASS |
+| 2 lock | +0.0370 | 1.812 | 0.040 | 2,306 | PASS |
+| 3 parameters | +0.0728 | 1.077 | 0.064 | 2,306 | PASS |
+| 4 envelope | +0.0685 | 1.023 | 0.139 | 1,112 | PASS |
+| 5 randomized | +0.0732 | 0.966 | 0.187 | 988 | PASS |
+
+> **This is not the headline run.** `training.total_timesteps` is 2,000,000 per rung; this used 300,000
+> to exercise the whole ladder end to end. The configured budget is ~2 h wall on this machine.
+> Nothing below should be read as a performance result — only as evidence the machinery works.
+
+Three things the run confirmed, and one it did not:
+
+- **The lock is visible in `proj_distance`.** 0.073 with no lock (rung 1) → 1.812 the moment it is added
+  (rung 2). The constraint is binding on the policy's proposals, not decorative.
+- **Cash weight rises monotonically with the constraints** — 0.039 → 0.187 as the lock, then the grid, then
+  the envelope, then reservoir starts come on. The policy is responding to its parameters.
+- **The envelope costs about half the throughput** (2,306 → 1,112 steps/s), matching Stage 6's finding that
+  it is roughly two-thirds of a step.
+- **Q3 is NOT settled.** `proj_distance` fell *within* rung 3 (1.77 → 1.19) and rung 4 (1.20 → 0.99), which
+  is the healthy D9 signal — but it rose within rung 2 (1.35 → 1.78) and rung 5 (0.84 → 0.95). At 300k
+  timesteps and 19 logged points per rung this is suggestive, not an answer.
+
+### `[ ]` Stage 8 — Walk-forward · `python -m scripts.s08_walk_forward --config config/evaluation.yaml` · `python -m scripts.s08_walk_forward --config config/evaluation.yaml`
 
 - [ ] Expanding annual folds, train/val/test with no overlap
 - [ ] Lexicographic model selection; `selection.json` per fold
@@ -412,7 +442,7 @@ until it is built.
 |---|---|---|---|
 | ~~Q1~~ | ~~Risk-envelope calibration values~~ | — | **CLOSED 2026-09-01.** `quantile 0.05, horizon 5, aggregation max, measure cvar`, calibrated over 20 annual windows; written into `config/constraints.yaml` |
 | Q5 | **Does `device: cpu` still win end to end?** Stage 6 measured the *network alone* at `obs_dim = 656`: CUDA 0.116 s vs CPU 0.278 s for 50 fwd+bwd — the GPU is **2.4× faster**, against D14's end-to-end CPU win of 2.7×. Not a contradiction (D14 measured rollout-inclusive wall clock) but D14's premise moved | Stage 7 wall clock | **Re-run the end-to-end comparison in Stage 7** at `n_envs = 8`. `cpu` remains the default until then |
-| Q3 | Does `proj_distance` decline without an auxiliary penalty? Sharpened by Stage 6: under a random policy `infeasible_fallback` fires on **20.8%** of steps overall and **28.5%** at `D_max = 0.05`, and on every one of those the agent's action is discarded outright | Whether D9 mitigation 2 or 3 is needed | Observe in Curriculum stage 2–3. Track `infeasible_fallback` alongside `proj_distance` — the fallback rate is the harsher signal |
+| Q3 | **Does `proj_distance` decline without an auxiliary penalty?** Stage 7 gave mixed evidence at a 300k-per-rung budget: it fell within rung 3 (1.77 → 1.19) and rung 4 (1.20 → 0.99), but rose within rung 2 (1.35 → 1.78) and rung 5 (0.84 → 0.95). Sharpened by Stage 6: `infeasible_fallback` fires on **20.8%** of random-policy steps and **28.5%** at `D_max = 0.05`, and on each the action is discarded outright | Whether D9 mitigation 2 or 3 is needed | **Re-read on the full 2M-per-rung run** before concluding. Mitigation 2 (confirm the masks are non-degenerate) is already satisfied — observations are not re-normalized, so the masks reach the network intact |
 | Q4 | Is the 3×3 stress grid sufficient, or is the full 7×5 needed? | Stage 9 runtime | Decide after Stage 8 timing is known |
 | Q7 | **`gamma = 0.999` is inherited from the superseded parameter range.** It was justified by "`N` up to 180 calendar days"; under D16 the lock is ~30 calendar days (~21 sessions), for which 0.99 (~100 sessions) is already several times the constraint horizon. 0.999 gives ~1000 sessions, ~4 years, far longer than the longest episode (504) | Stage 7 credit assignment and sample efficiency | Settle on a **validation** year, the only place tuning is permitted. Not changed as part of D16, because D16 is a spec change and gamma is a tuned value |
 
@@ -449,6 +479,11 @@ until it is built.
 | 2026-09-01 | **The lock is what empties the risk envelope's feasible set.** With `N = 0`, `w_safe` is all cash and the fallback fires on 0.7% of steps at `D_max = 0.05`; with `N = 30` it fires on **28.5%**, though the envelope *binds* less often. The lock floors `w_safe` at holdings that carry real risk. Recorded in [reference/risk-envelope.md](reference/risk-envelope.md) §6b; it makes `infeasible_fallback` a first-class Stage 7 diagnostic and `D_max = 0.05` a cell to report separately. |
 | 2026-09-01 | **`src/sim/engine.py` extracted.** The per-step body is now shared verbatim between `simulate()` and `env.step`, so a baseline and a policy cannot drift onto different machinery — which was the whole reason for running the baselines through the simulator. Stage 4/5 behaviour is unchanged: all 108 Phase-1 tests still pass. |
 | 2026-09-01 | **Q2 closed: `n_envs = 8`, `SubprocVecEnv`** (2,844 steps/s). 8 → 16 workers buys 3.7% for twice the processes. |
+| 2026-09-01 | **Stage 7 complete.** Five curriculum rungs, warm-started in order, all five gates green with zero lock and zero feasibility violations. 582,620-parameter policy; 1.5M timesteps in 18 min at a demonstration budget. 307 tests pass in 60s. |
+| 2026-09-01 | **Observations are NOT re-normalized by `VecNormalize`** — a correction to [rl-training.md](reference/rl-training.md) §2. Measured: the fold scaler already leaves the observation at mean 0.20 / std 0.83, and **19 of the 656 dimensions are constant `pf_available` bits** that `VecNormalize` would map to exactly 0 — destroying the masks the policy reads to mask its own logits, which is the silent failure §3 names. Rewards are still normalized (log returns are ~1e-3). |
+| 2026-09-01 | **The actor head is per-asset, not a flat `Linear(trunk → K+1)`** — a second correction to §2. A flat head has separate weights per asset and voids the equivariance the shared encoder buys; `logit_i = head([e_i, context])` restores it, with a separate small head for CASH. Both the equivariance and the flat per-asset parameter count are asserted in tests rather than claimed. |
+| 2026-09-01 | **Availability masking uses -5, not `-inf`.** The action space is bounded `[-1, 1]`, so `-inf` is unavailable and would NaN the Gaussian log-prob; after `LOGIT_SCALE` a -5 mean is worth `e^-50` of relative weight. |
+| 2026-09-01 | **A `slow` pytest marker now exists**, deselected by default. Real PPO updates cost ~8s against a 60s suite budget that is already at its limit; run `pytest -m slow` before trusting a training run. |
 | 2026-09-01 | **The comparison report format is pinned before training**, as `scripts/s12_report.py` + `src/evaluation/{report,render,categories}.py`, with a baseline-only reference report in `artifacts/reports/baselines/`. A format settled after seeing results is a format chosen to flatter them. The RL policy becomes one more column and nothing else changes. |
 | 2026-09-01 | **Every report year is an INDEPENDENT evaluation window** (fresh capital, peak reset each January). Forced, not stylistic: on the continuous 2004–2024 run `spy_buy_hold` breached `D_max` in 2009, went 100% cash and stayed there for fifteen years — every annual cell from 2009 on would have read 0.00%. It also matches how walk-forward evaluates the policy, one model per test year, which is what makes the RL column comparable. |
 | 2026-09-01 | **Report Sharpe uses `rf = 0`.** CASH returns exactly 0.00%/day and is the agent's outside option, so raw return *is* excess return; a T-bill rate would make CASH a negative-carry asset the simulator does not model. |

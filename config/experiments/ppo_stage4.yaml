@@ -1,0 +1,21 @@
+# Stage 7 curriculum 4 of 5 -- the drawdown safety envelope.
+#
+# Inherits every hyperparameter, the observation selection and the hard constraints
+# from the base configs. Only what this rung CHANGES is written below, so a diff
+# between two stage files is exactly the difficulty being added.
+extends:
+  - ../training.yaml
+
+# Curriculum stage 4 -- THE ENVELOPE.
+#
+# Turns on the action-level risk envelope inside env.step. From here the projection can
+# override the policy outright, so `proj_distance` and `infeasible_fallback` become the
+# signals to watch (D9, rl-training.md section 3).
+#
+# Expect the fallback rate to be material at the tight end of the grid: Stage 6
+# measured the lock driving it from 0.7% to 28.5% at D_max = 0.05, because a locked
+# `w_safe` carries real risk. That is the constraint layer working, not failing.
+environment:
+  episode_lengths: [252]
+  risk_enabled: true
+  flat_start: true

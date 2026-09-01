@@ -1,0 +1,23 @@
+# Stage 7 curriculum 1 of 5 -- portfolio mechanics only.
+#
+# Inherits every hyperparameter, the observation selection and the hard constraints
+# from the base configs. Only what this rung CHANGES is written below, so a diff
+# between two stage files is exactly the difficulty being added.
+extends:
+  - ../training.yaml
+
+# Curriculum stage 1 -- MECHANICS.
+#
+# No lock, one fixed ceiling, no risk envelope, flat all-cash start. Nothing here can
+# confound the one question this rung asks: can the agent learn to allocate at all?
+#
+# This is the diagnostic rung. If it does not beat `cash`, the bug is in the simulator
+# or the reward, NOT in the policy -- and the curriculum exists partly so that
+# statement can be made without hedging.
+environment:
+  fixed_hold_days: 0
+  fixed_max_drawdown: 0.20
+  episode_lengths: [252]
+  risk_enabled: false
+  flat_start: true
+  stress_reset: false
