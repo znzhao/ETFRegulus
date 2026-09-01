@@ -1,0 +1,71 @@
+# The environment and the RL run. Read by Stage 6 (smoke test) and Stage 7 (training).
+#
+# Inherits the hard constraints so the environment, the simulator and the baselines cannot
+# disagree about what N and D_max mean, and the observation selection so the policy input
+# is declared in exactly one place.
+extends:
+  - sim/default.yaml
+  - observation.yaml
+
+environment:
+  # Null uses the latest Stage 5 reservoir (env-mdp.md section 5, Approach A).
+  reservoir: null
+
+  # Which fold's scaler to apply. NOT optional, and not null: measured in Stage 6, an
+  # unscaled observation puts 3.7% of its entries hard against the +/-10 clip, against
+  # 0.001% with a fold scaler applied -- roughly one input in twenty-seven degraded to a
+  # saturated constant. A scaler fitted anywhere other than the named fold's training
+  # window would be a walk-forward leak, so Stage 7 sets this per fold; `fold_2012` is
+  # the first fold and its training window (2004-01-02..2010-12-31) is what the smoke
+  # test's default episode window stays inside.
+  fold_id: fold_2012
+
+  # Sampled per episode, not fixed at 252 (env-mdp.md section 7).
+  episode_lengths: [63, 126, 252, 504]
+
+  # Restrict episodes to a date range. Must stay inside `fold_id`'s TRAINING window: an
+  # episode outside it is being observed through a scaler fitted on data it postdates.
+  window:
+    start: "2004-01-02"
+    end: "2010-12-31"
+
+  # Deliberately-breached starting states. A separate stress environment, never a default.
+  stress_reset: false
+
+  # The risk envelope inside env.step. On by default: an environment without it is not
+  # the environment the policy is deployed into.
+  risk_enabled: true
+
+  # Assert every invariant on every step. Stage 6 leaves this on -- that is its job.
+  # Stage 7 turns it off; the check roughly doubles the step cost.
+  strict: true
+
+  # Pin a single parameter cell. Used by the curriculum's first stage and by tests that
+  # need a deterministic comparison; null means sample from the D16 grid.
+  fixed_hold_days: null
+  fixed_max_drawdown: null
+
+# ---------------------------------------------------------------------- Stage 6 only
+smoke:
+  episodes: 500
+  # Random-policy episodes are the point: a policy that has learned nothing still has to
+  # be unable to violate a constraint. Short episodes cover more resets per unit time,
+  # which is where the reachability bugs live.
+  episode_length: 63
+  check_env: true          # gymnasium.utils.env_checker + SB3 check_env
+  determinism_repeats: 2
+  throughput:
+    # D5 depends on knowing this number before any hyperparameter is tuned.
+    worker_counts: [1, 4, 8, 16]
+    steps_per_worker: 200
+    # The GPU arm re-tests D14's premise at the real observation size, which is larger
+    # than the benchmark it was decided on. Skipped automatically if CUDA is absent.
+    devices: [cpu, cuda]
+
+# ---------------------------------------------------------------------- Stage 7 only
+training:
+  algo: ppo
+  device: cpu              # D14 -- benchmarked, not assumed. Re-checked in Stage 6.
+  n_envs: 8                # provisional; Stage 6's throughput table settles it (Q2)
+  total_timesteps: 2_000_000
+  seed: 42

@@ -208,6 +208,56 @@ Called once per step across millions of steps, so:
 
 ---
 
+## 6b. The lock can empty the feasible set — measured in Stage 6
+
+The most important thing Stage 6 found, and it is an interaction between the two hard
+constraints rather than a property of either alone.
+
+The de-risking scan blends the proposed portfolio toward `w_safe`, and `w_safe` is defined
+as *the lock floors, with everything else in cash*. When there is no lock, `w_safe` is
+**all cash**: zero risk, feasible against any budget, so the scan always succeeds and the
+`infeasible_fallback` path is never needed. When there is a lock, `w_safe` still carries
+whatever the lock floors force it to hold — and when the drawdown budget is small, that
+floor **alone** can exceed the budget. The feasible set is then genuinely empty, and
+returning `w_safe` is correct behaviour under P5 (the fallback must always return
+something and never raise), not a bug.
+
+Measured with a random policy over 2008–2009, 25-step episodes:
+
+| `N` | `D_max` | fallback rate | safety-intervention rate |
+|---|---|---|---|
+| 0 | 0.05 | **0.007** | 0.450 |
+| 0 | 0.15 | **0.000** | 0.058 |
+| 30 | 0.05 | **0.285** | 0.305 |
+| 30 | 0.15 | 0.045 | 0.051 |
+| 60 | 0.05 | 0.293 | 0.308 |
+| 60 | 0.15 | 0.045 | 0.051 |
+
+Read the `N = 0` rows first. The envelope binds *more often* without a lock (45% vs 31% at
+`D_max = 0.05`) and yet essentially never falls back — it always finds a feasible blend,
+because it can always retreat to cash. Adding the lock moves the fallback rate from 0.7%
+to 28.5% at the same ceiling. The lock is what makes the envelope infeasible, not the
+market and not the tightness of the ceiling on its own.
+
+A note on how this was established, because a first attempt got it wrong: within the
+`N = 30` runs alone, the correlation between locked fraction and `w_safe`'s stress loss is
+only `-0.10`, which looks like evidence *against* the lock mattering. It is not — inside
+those runs the locked fraction is high almost everywhere (mean 0.85–0.96), so it has no
+variance left to explain anything. The `N = 0` control is the experiment that settles it,
+and it is unambiguous.
+
+Two consequences, both for Stage 7:
+
+1. **`infeasible_fallback` is a first-class training diagnostic, not an error counter.** At
+   a tight `D_max` roughly one step in four discards the agent's action entirely, so the
+   policy gets reward with no gradient explaining why — D9's acknowledged cost, quantified.
+   If it stays this high once the policy is no longer random, D9 mitigation 2 or 3 becomes
+   necessary rather than optional.
+2. **`D_max = 0.05` is qualitatively different from the rest of the grid** and should be
+   reported separately rather than averaged in.
+
+---
+
 ## 7. Calibration, and how to read it
 
 The envelope has real parameters (`quantile`, `horizon_days`, `block_length`, `aggregation`) and they trade

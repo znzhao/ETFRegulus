@@ -1,0 +1,100 @@
+# The observation: which of Stage 3's 163 feature columns actually enter the policy input.
+#
+# This file closes open question Q6. Stage 3 emits 64 per-asset columns (50 etf + 14
+# cross-sectional) and 99 macro columns. Taken whole that is 24 x 64 + 99 = 1,635 market
+# dimensions before a single portfolio field, against the ~300-dimensional policy the D14
+# CPU-vs-GPU benchmark was run on. Feeding all of it would (a) invalidate D14's premise,
+# (b) put ~1,500 inputs in front of a 2x256 trunk on ~5,000 training sessions, and (c) do
+# it while the correlation diagnostic already reports 11 pairs above |r| = 0.95.
+#
+# So the selection is DECLARED here rather than implied by whatever Stage 3 happened to
+# emit, and `src/env/observation.py` validates every name below against
+# `data/features/feature_manifest.json`. A typo is a startup error, not a silently
+# missing feature. Dropping a column here is a policy-invalidating change: the manifest
+# hash plus this file's hash go into the run manifest.
+#
+# What is NOT selectable: the portfolio and parameter blocks. Those are the Markov
+# sufficiency floor from reference/env-mdp.md section 1 and reference/features.md
+# section 4, and they are built in code precisely so that no config edit can remove one.
+
+observation:
+  # ---------------------------------------------------------------- per asset (K x F)
+  # Applied identically to all 24 tradables, in canonical universe order. Unavailable
+  # assets are zeroed and carry mask bit 0.
+  per_asset:
+    # Selection rule for returns: keep the ARITHMETIC `ret_*` ladder and drop the
+    # `logret_*` twin at every horizon. The Stage 2 correlation diagnostic measured
+    # |r| = 0.98-1.00 between the pairs; both were kept in the feature store on purpose
+    # (ranks want arithmetic, volatility wants log), but the observation only needs one,
+    # and the volatility information is already carried by the `vol_*` columns.
+    etf:
+      - ret_1              # yesterday
+      - ret_5              # week
+      - ret_21             # month -- roughly one lock period at the primary N
+      - ret_63             # quarter
+      - ret_252            # year, the momentum horizon the baselines use
+      - vol_21
+      - vol_63             # two scales is enough to express a vol-regime change
+      - drawdown_63
+      - drawdown_252       # the agent's own constraint is a drawdown; give it the asset's
+      - close_over_sma_50
+      - close_over_sma_200  # the two trend filters the momentum baseline is built on
+      - rsi_14
+      - macd_hist          # the level and signal are redundant given their difference
+      - atr_norm
+      - bollinger_pct_b
+      - volume_z_21        # one liquidity signal; the ratio twins add little
+
+    cross_sectional:
+      - rank_ret_63
+      - rank_momentum_252
+      - rank_vol_21
+      - rs_vs_spy_63       # relative strength against the benchmark it is measured against
+
+  # ------------------------------------------------------------------- global blocks
+  # One value per session, shared across assets.
+  global:
+    # `universe_size` is stored per (session, ticker) but is a per-session scalar, so it
+    # belongs here rather than being repeated 24 times.
+    cross_sectional:
+      - universe_size
+
+    # 99 macro columns reduced to the level plus one change horizon per family. The
+    # `_d1/_d5/_d21/_d63` ladders are near-collinear by construction, and a policy that
+    # needs a finer view of the curve can read it off the levels.
+    macro:
+      - fred_T10Y2Y            # curve slope: the recession signal
+      - fred_T10Y3M
+      - fred_BAA10Y            # credit spread: the risk-appetite signal
+      - fred_DGS3MO            # the front end -- the cash leg's actual opportunity cost
+      - fred_T10YIE            # inflation expectations
+      - fred_UNRATE
+      - fred_CPIAUCSL_yoy      # the level series enter as year-on-year, not as levels
+      - fred_INDPRO_yoy
+      - VIX_level
+      - VIX_d5
+      - VIX_rel_21             # vol relative to its own recent range beats the raw level
+      - VVIX_level
+      - TNX_level
+      - TNX_d21
+      - IRX_level
+      - DX_Y_NYB_ret_21        # the dollar: the cross-asset driver for GLD, DBC, VEA, VWO
+      - VTI_ret_21             # total-market context beyond SPY
+      - market_vol_21
+      - vol_regime_ratio
+      - market_trend_regime
+      - market_drawdown_252    # the market's drawdown, next to the portfolio's own
+
+# ---------------------------------------------------------------------- normalization
+# `N` and `D_max` are normalized by FIXED constants, never by fitted statistics. This is
+# what makes deployment semantics identical to training semantics: a policy asked for
+# N = 30 at deployment must see the number it saw in training (env-mdp.md section 4).
+scaling:
+  hold_days_divisor: 365.0   # N in calendar days -> years
+  max_drawdown: identity     # already in [0, 1]
+  # Market features arrive pre-scaled by the fold scaler fitted on that fold's TRAINING
+  # window only (features.md section 5). Never a full-sample scaler.
+  fold_scaler: required
+  # Post-scaling clip, applied to the assembled vector as a last line of defence. The
+  # fold scaler already clips; this catches a feature no scaler saw.
+  clip: 10.0

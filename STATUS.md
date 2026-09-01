@@ -11,7 +11,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Phase 1 complete — Stage 4 is GREEN.** Next: Stage 6, the env smoke test |
+| **Current stage** | **Stage 6 complete — the environment is green.** Next: Stage 7, PPO training |
 | **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
 | **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
@@ -23,9 +23,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 ## Finished
 
-**Phases 0 and 1 are complete.** Stages 0–5 are `[x]`: every gating test named for them in
-[reference/testing.md](reference/testing.md) §3 passes, and each stage runs end to end from a
-clean checkout.
+**Phases 0 and 1 are complete, and Stage 6 is green.** Stages 0–6 are `[x]`: every gating test
+named for them in [reference/testing.md](reference/testing.md) §3 passes, and each stage runs end
+to end from a clean checkout.
 
 | | Stage | Entry point | Gate | State |
 |---|---|---|---|---|
@@ -35,6 +35,7 @@ clean checkout.
 | | 3 — Features | `s03_build_features` | I6, T10, manifest | `[x]` 163 columns, 14 fold scalers |
 | **Phase 1** | **4 — Simulator** | `s04_simulate` | **I1–I6, T1–T7, T15** | `[x]` **THE GATE — GREEN** |
 | | 5 — Baselines | `s05_run_baselines` | zero violations + 5 checks | `[x]` all six, all checks pass |
+| **Phase 2** | 6 — Env smoke test | `s06_smoke_env` | T8, T9, T14 + zero violations | `[x]` 7/7 checks, 31,500 steps, 0 violations |
 
 **Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
 
@@ -55,10 +56,12 @@ clean checkout.
 | T7 | no silent repair | `tests/constraints/test_projection.py` |
 | T10 | scaler fold isolation | `tests/features/test_scalers.py` |
 | T15 | fill price inside the day's range | `tests/portfolio/test_ledger_and_execution.py` |
+| T8 | reset sampler reachable, `D_t ≤ D_max` | `tests/env/test_reset_sampler.py` — both generators, whole grid |
+| T9 | determinism, incl. across worker counts | `tests/env/test_determinism.py` |
+| T14 | observation matches the manifest | `tests/env/test_observation.py` — asserted by NAME at index |
 | T16 | stage harness | `tests/test_stage_harness.py` |
 
-Still to prove: **T8, T9, T11, T12, T13, T14** — all belong to Stages 6–8, which are not started.
-(T9 determinism is already asserted at the Stage 4 level; the vectorized-worker form is Stage 6's.)
+Still to prove: **T11, T12, T13** — all belong to Stage 8, which is not started.
 
 **Code built and committed:**
 
@@ -280,19 +283,49 @@ only as a tie-break. Realized drawdown responds correctly to the ceiling:
 
 ---
 
-## Phase 2 — Environment and RL  `[ ]` — **unblocked** (Stage 4 is `[x]`), not started
+## Phase 2 — Environment and RL  `[~]` — Stage 6 is `[x]`; Stage 7 is next
 
-### `[ ]` Stage 6 — Env smoke test · `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500`
+### `[x]` Stage 6 — Env smoke test · `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500`
 
-- [ ] `gymnasium` + SB3 `check_env` pass
-- [ ] 500 random episodes across the full `(N, D_max)` grid, invariants asserted every step
-- [ ] Observation bounds/dtype/finiteness
-- [ ] **Throughput benchmark** — Dummy vs Subproc at 1/4/8/16 workers, cpu vs cuda → record below
-      (D14 set `device: cpu` from a Pendulum proxy; re-confirm on the real env, and re-run whenever the
-      policy architecture changes)
-- [ ] **Gate:** T8, T9, T14, zero violations
+- [x] `gymnasium` + SB3 `check_env` pass — **zero warnings** (see the action-space correction below)
+- [x] 500 random episodes across the full `(N, D_max)` grid, invariants asserted every step —
+      **31,500 steps, 0 violations**, all 25 cells visited ≥20 times, both reset modes exercised
+- [x] Observation bounds/dtype/finiteness — `float32`, inside its declared `Box`, never NaN or inf
+- [x] **Throughput benchmark** — Dummy vs Subproc at 1/4/8/16 workers, cpu vs cuda → recorded below
+- [x] **Gate:** T8, T9, T14, zero violations — 7/7 checks pass
 
-> Throughput results: _(fill in — worker count for Stage 7 is chosen from this, not guessed)_
+**Q6 closed — the observation is 656 dimensions.** Declared in the new
+[config/observation.yaml](config/observation.yaml) and validated against `feature_manifest.json` at
+startup, so a typo is an error rather than a silently zeroed column. From Stage 3's 163 columns:
+**20 of 64 per-asset** (the `ret_*` ladder with the near-collinear `logret_*` twins dropped, two
+vol scales, two drawdowns, two trend filters, four oscillators, one liquidity, four cross-sectional)
+and **21 of 99 macro** (level plus one change horizon per family). Layout
+`[22 global | 24 × 26 per-asset | 8 portfolio | 2 params]`.
+
+> **Throughput** (24 CPUs, `obs_dim = 656`, envelope on, `strict` off):
+>
+> | vec | workers | steps/s |
+> |---|---|---|
+> | Dummy | 1 | 579 |
+> | Dummy | 4 | 563 |
+> | Dummy | 8 | 580 |
+> | Subproc | 1 | 516 |
+> | Subproc | 4 | 1,567 |
+> | Subproc | **8** | **2,844** |
+> | Subproc | 16 | 2,949 |
+>
+> **Q2 closed: `n_envs = 8`, `SubprocVecEnv`.** Going 8 → 16 buys **3.7%** for double the processes
+> and double the memory; 1 → 8 buys 5.5×. `DummyVecEnv` is flat in the worker count, as it must be —
+> it steps serially — which confirms the benchmark is measuring what it claims to.
+>
+> **Q5 — D14 is _not_ confirmed, and not refuted either. It must be re-measured in Stage 7.**
+> On a 2×256 trunk at this observation size, CUDA runs 50 forward+backward passes in **0.116 s**
+> against CPU's **0.278 s** — the GPU is **2.4× faster**, where D14 measured CPU **2.7× faster
+> end to end**. These do not contradict each other: D14's number was end-to-end PPO, where rollout
+> transfer latency dominates, and this one is the network alone. What has changed is D14's premise —
+> it was decided at ~300 dims and the observation is now 656. `device: cpu` stays the default
+> because it is the measured end-to-end verdict, but Stage 7 must re-run the end-to-end comparison
+> before the setting is treated as settled.
 
 ### `[ ]` Stage 7 — Train PPO · `python -m scripts.s07_train_ppo --config config/experiments/ppo_stageK.yaml`
 
@@ -377,12 +410,10 @@ until it is built.
 | # | Question | Blocks | Status |
 |---|---|---|---|
 | ~~Q1~~ | ~~Risk-envelope calibration values~~ | — | **CLOSED 2026-09-01.** `quantile 0.05, horizon 5, aggregation max, measure cvar`, calibrated over 20 annual windows; written into `config/constraints.yaml` |
-| Q2 | Worker count / vectorization strategy | Stage 7 throughput | Resolve from the Stage 6 benchmark. **Stage 4 measured ~1.6 ms/step with the envelope on** (~625 steps/s single-threaded), and the envelope is ~two-thirds of it — so env stepping, not the network, is the bottleneck, as D5 assumed |
-| Q5 | Does `device: cpu` still win on the real env and at high worker counts? Margin is only **1.2x** | Stage 7 wall clock | Confirm in Stage 6; re-run on any architecture change |
-| Q3 | Does `proj_distance` decline without an auxiliary penalty? | Whether D9 mitigation 3 is needed | Observe in Curriculum stage 2–3 |
+| Q5 | **Does `device: cpu` still win end to end?** Stage 6 measured the *network alone* at `obs_dim = 656`: CUDA 0.116 s vs CPU 0.278 s for 50 fwd+bwd — the GPU is **2.4× faster**, against D14's end-to-end CPU win of 2.7×. Not a contradiction (D14 measured rollout-inclusive wall clock) but D14's premise moved | Stage 7 wall clock | **Re-run the end-to-end comparison in Stage 7** at `n_envs = 8`. `cpu` remains the default until then |
+| Q3 | Does `proj_distance` decline without an auxiliary penalty? Sharpened by Stage 6: under a random policy `infeasible_fallback` fires on **20.8%** of steps overall and **28.5%** at `D_max = 0.05`, and on every one of those the agent's action is discarded outright | Whether D9 mitigation 2 or 3 is needed | Observe in Curriculum stage 2–3. Track `infeasible_fallback` alongside `proj_distance` — the fallback rate is the harsher signal |
 | Q4 | Is the 3×3 stress grid sufficient, or is the full 7×5 needed? | Stage 9 runtime | Decide after Stage 8 timing is known |
 | Q7 | **`gamma = 0.999` is inherited from the superseded parameter range.** It was justified by "`N` up to 180 calendar days"; under D16 the lock is ~30 calendar days (~21 sessions), for which 0.99 (~100 sessions) is already several times the constraint horizon. 0.999 gives ~1000 sessions, ~4 years, far longer than the longest episode (504) | Stage 7 credit assignment and sample efficiency | Settle on a **validation** year, the only place tuning is permitted. Not changed as part of D16, because D16 is a spec change and gamma is a tuned value |
-| Q6 | **Which feature columns enter the observation?** Stage 3 emits **64 per-asset** columns (50 etf + 14 cross-sectional); 24 assets × 64 = 1,536 before the macro block, against the ~300-dim policy the D14 benchmark assumed | Stage 6 obs size, Stage 7 wall clock, and whether D14 still holds | Select in Stage 6, validated against `feature_manifest.json`. The manifest exists so the selection is explicit rather than implicit |
 
 ---
 
@@ -411,4 +442,11 @@ until it is built.
 | 2026-09-01 | **Convexity replaces monotonicity as the risk-envelope requirement.** `w_safe` minimizes exposure, not risk (measured 7x riskier than a hedged book), so [risk-envelope.md](reference/risk-envelope.md) §5's monotonicity premise is false. The alpha bisection needs a convex sublevel set; `measure: cvar` provides it, `var` does not. |
 | 2026-09-01 | **The envelope is calibrated over ANNUAL windows.** On one 21-year path the intervention rate measures time-under-water (0.9984 correlation to "already breached") because the peak never resets. Corrected in [risk-envelope.md](reference/risk-envelope.md) §7. |
 | 2026-09-01 | **Q1 closed:** `quantile 0.05, horizon_days 5, aggregation max, measure cvar`. Selected by design constraint with return as tie-break — a 2-day horizon returned +0.5pp more and was rejected, because tuning the risk layer on return is the failure the envelope exists to prevent. |
+| 2026-09-01 | **Q6 closed: the observation is 656 dimensions**, declared in `config/observation.yaml` and validated against the feature manifest at startup. 20 of 64 per-asset columns and 21 of 99 macro; the near-collinear `logret_*` twins are dropped, since Stage 2's diagnostic put them at \|r\| = 0.98–1.00 against `ret_*`. |
+| 2026-09-01 | **The fold scaler is not optional for the environment.** Unscaled, **3.7%** of observation entries sit hard against the ±10 clip — one input in twenty-seven degraded to a saturated constant — against **0.001%** with a fold scaler applied. `environment.fold_id` is now required rather than nullable. |
+| 2026-09-01 | **The action space is `[-1, 1]`, scaled by `LOGIT_SCALE = 10` inside the env.** [reference/env-mdp.md](reference/env-mdp.md) §8 specified `Box(-inf, inf)`; unbounded defeats SB3's action clipping, and a wide bound leaves PPO's unit-variance Gaussian head sampling only near-uniform allocations. Both checkers now pass with zero warnings. |
+| 2026-09-01 | **The lock is what empties the risk envelope's feasible set.** With `N = 0`, `w_safe` is all cash and the fallback fires on 0.7% of steps at `D_max = 0.05`; with `N = 30` it fires on **28.5%**, though the envelope *binds* less often. The lock floors `w_safe` at holdings that carry real risk. Recorded in [reference/risk-envelope.md](reference/risk-envelope.md) §6b; it makes `infeasible_fallback` a first-class Stage 7 diagnostic and `D_max = 0.05` a cell to report separately. |
+| 2026-09-01 | **`src/sim/engine.py` extracted.** The per-step body is now shared verbatim between `simulate()` and `env.step`, so a baseline and a policy cannot drift onto different machinery — which was the whole reason for running the baselines through the simulator. Stage 4/5 behaviour is unchanged: all 108 Phase-1 tests still pass. |
+| 2026-09-01 | **Q2 closed: `n_envs = 8`, `SubprocVecEnv`** (2,844 steps/s). 8 → 16 workers buys 3.7% for twice the processes. |
+| 2026-09-01 | **Stage 6 complete.** 7/7 gate checks, 31,500 random-policy steps, zero invariant violations; 260 tests pass in 58s. |
 | 2026-09-01 | **A drawdown ceiling against a never-resetting peak is far harsher than the same ceiling per fold.** Stage 8 and Stage 12 must state which convention a result used; the two are not comparable. |

@@ -151,11 +151,15 @@ activemq-data/
 .env
 .envrc
 .venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# Anchored to the repo root ON PURPOSE. Unanchored, `env/` and `ENV/` match ANY directory
+# of that name at any depth -- which silently excluded `src/env/` and `tests/env/`, the
+# whole Stage 6 implementation, from `git add`. These patterns exist for a root-level
+# virtualenv, so that is what they now match.
+/env/
+/venv/
+/ENV/
+/env.bak/
+/venv.bak/
 
 # Spyder project settings
 .spyderproject
