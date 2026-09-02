@@ -30,7 +30,7 @@ baselines:
 calibration:
   enabled: true
   baselines: [equal_weight, spy_tlt_60_40]
-  d_max_grid: [0.001, 0.005, 0.01, 0.05, 0.10]
+  d_max_grid: [0.01, 0.02, 0.03, 0.05, 0.10]
   intervention_rate_ceiling: 0.50
   min_horizon_days: 5        # must span the overnight gap plus several sessions (risk-envelope.md 3)
   candidates:

@@ -38,7 +38,7 @@ N_SWEEP: tuple[int, ...] = (0, 7, 15, 21, 30, 42, 60, 90, 180)
 #: Deliberately outside the training range. Every cell at one of these is reported as OOD.
 N_OUT_OF_DISTRIBUTION: frozenset[int] = frozenset({0, 7, 90, 180})
 
-D_SWEEP: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05, 0.10)
+D_SWEEP: tuple[float, ...] = (0.01, 0.02, 0.03, 0.05, 0.10)
 
 #: The default combined grid (D5): the operating range, so it measures the system where it
 #: is meant to run.

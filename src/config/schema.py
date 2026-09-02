@@ -205,7 +205,7 @@ class HoldDaysSpec:
 @dataclass(frozen=True)
 class MaxDrawdownSpec:
     primary: float = 0.15
-    values: list[float] = field(default_factory=lambda: [0.001, 0.005, 0.01, 0.05, 0.10])
+    values: list[float] = field(default_factory=lambda: [0.01, 0.02, 0.03, 0.05, 0.10])
     weights: list[float] | None = None
 
     def __post_init__(self) -> None:

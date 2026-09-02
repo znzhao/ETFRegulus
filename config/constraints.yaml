@@ -44,26 +44,28 @@ lock:
 drawdown:
   # The maximum-drawdown ceiling. An ACTION-level safety constraint, never a guarantee
   # about the realized path, and never a reward penalty (D11, risk-envelope.md section 1).
-  # REVISED 2026-09-02: the range now spans 0.1% to 10%. The previous grid topped out
-  # at 25%, which is a ceiling so loose it almost never binds -- a "constraint" that does
-  # not constrain teaches the policy nothing about operating under one.
+  # REVISED 2026-09-02 (twice). The range is 1% to 10%.
+  #
+  # First revision cut the old 5%-25% grid, whose top end was a ceiling so loose it almost
+  # never bound -- a "constraint" that does not constrain teaches the policy nothing about
+  # operating under one. Second revision dropped the 0.1% and 0.5% cells from the bottom,
+  # for the opposite reason: measured at 1%, the policy sits 78% in cash, and below that
+  # the budget `1 - (1 - D_max) * P/V` falls under the 5-day CVaR of essentially any
+  # equity holding, so the feasible set is cash and the cell teaches only "hold cash".
+  # A fifth of training spent there was a fifth wasted.
   #
   # Roughly log-spaced, because a drawdown ceiling is a multiplicative quantity: 5% -> 10%
-  # is the same size of change as 5% -> 2.5%. The grid spans two orders of magnitude and
+  # is the same size of change as 5% -> 2.5%. Weighted geometric centre ~3.1%. The grid
   # contains 1%, 5% and 10% exactly, which are the cells the reports lead with.
   max_drawdown:
     primary: 0.05
-    values:  [0.001, 0.005, 0.01, 0.05, 0.10]
+    values:  [0.01, 0.02, 0.03, 0.05, 0.10]
     # Uniform: unlike N, there is no single expected deployment value here -- the whole
     # point of conditioning on D_max is to serve a caller who picks their own ceiling.
     #
-    # KNOWN CONSEQUENCE, stated rather than discovered later: the budget is
-    # `1 - (1 - D_max) * P/V`, so at D_max = 0.001 it is ~0.1% even at the running peak,
-    # which is below the 5-day CVaR of essentially any equity holding. Those cells are
-    # near-degenerate -- the feasible set is cash -- so under uniform sampling about a
-    # fifth of training is spent learning "hold cash". That is a real cost and the first
-    # knob to revisit if the policy underperforms; it is left uniform here because
-    # reweighting on a guess is tuning, not design.
+    # The degenerate cells that made uniform sampling wasteful are gone from the grid
+    # itself, which is a cleaner fix than reweighting around them. 1% still binds hard
+    # -- the policy holds ~78% cash there -- but it binds rather than forbidding.
     weights: null
 
 projection:
