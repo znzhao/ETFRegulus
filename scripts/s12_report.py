@@ -307,7 +307,7 @@ def render_markdown(summary: pd.DataFrame, tables: dict, meta: dict,
         "worst annual drawdown**, not a drawdown across the window — a cross-window figure "
         "would be measured against a peak no strategy operated under.")
     add("")
-    perf = summary[["Annual return %", "Return std %", "Sharpe", "Max drawdown %"]]
+    perf = summary[["Annual return %", "Return std %", "Sharpe", "Sortino", "Max drawdown %"]]
     add(_md_table(perf, 2, index_name="Strategy"))
     add("")
     add("### Average allocation — whole window (percentage points, rows sum to 100)")
@@ -343,6 +343,8 @@ def render_markdown(summary: pd.DataFrame, tables: dict, meta: dict,
     for key, title, decimals, note in (
         ("annual_return", "Annual return (%)", 2, None),
         ("volatility", "Return standard deviation (%, annualized)", 2, None),
+        ("sortino", "Sortino ratio (rf = 0, downside deviation)", 2,
+         "The headline risk-adjusted measure; Sharpe below is for reference."),
         ("sharpe", "Sharpe ratio (rf = 0)", 2, None),
         ("max_drawdown", "Maximum drawdown (%, within year)", 2,
          "Peak resets on the first session of each year."),
@@ -467,7 +469,10 @@ def main(resolved: dict, ctx: StageContext) -> None:
             for name in summary.index:
                 if name == "rl_policy":
                     continue
-                better = float(rl["Sharpe"]) > float(summary.loc[name, "Sharpe"])
+                # SORTINO, not Sharpe. Sharpe penalises upside deviation as hard as
+                # downside, which is the wrong instrument for a system built around a
+                # drawdown constraint.
+                better = float(rl["Sortino"]) > float(summary.loc[name, "Sortino"])
                 note = ("POINT ESTIMATE ONLY, and on 13 years it carries no "
                         "significance: read the Stage 10 bootstrap bands before "
                         "treating a pass here as a result.")
@@ -476,9 +481,9 @@ def main(resolved: dict, ctx: StageContext) -> None:
                             "anyone could implement. " + note)
                 comparison["beats"][name] = {
                     "passed": better,
-                    "observed": (f"Sharpe {rl['Sharpe']:.2f} vs "
-                                 f"{summary.loc[name, 'Sharpe']:.2f}"),
-                    "requirement": "higher Sharpe than the baseline",
+                    "observed": (f"Sortino {rl['Sortino']:.2f} vs "
+                                 f"{summary.loc[name, 'Sortino']:.2f}"),
+                    "requirement": "higher Sortino than the baseline",
                     "note": note,
                 }
         acceptance = build_acceptance(wf, st, bs, adv, comparison)

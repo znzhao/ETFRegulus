@@ -128,6 +128,38 @@ def test_sharpe_uses_a_zero_risk_free_rate():
 def test_a_flat_path_has_zero_sharpe_and_no_divide_by_zero():
     m = annual_metrics(make_traj([100.0] * 20))
     assert m["volatility"] == 0.0 and m["sharpe"] == 0.0 and m["max_drawdown"] == 0.0
+    assert m["sortino"] == 0.0
+
+
+def test_sortino_uses_downside_deviation_over_every_observation():
+    """The denominator is `sqrt(mean(min(r, 0)^2))` over ALL observations, not over the
+    losing ones alone. Averaging over just the losers flatters a strategy that loses
+    rarely -- three bad days out of 250 would set the whole denominator."""
+    traj = make_traj([100.0, 110.0, 99.0, 108.9])
+    m = annual_metrics(traj)
+    returns = np.array([0.10, -0.10, 0.10])
+    expected = float(np.sqrt(np.mean(np.minimum(returns, 0.0) ** 2)) * np.sqrt(252))
+    assert m["downside_deviation"] == pytest.approx(expected, rel=1e-9)
+    assert m["sortino"] == pytest.approx(m["annualized_return"] / expected, rel=1e-9)
+
+
+def test_sortino_rewards_upside_that_sharpe_penalises():
+    """The reason for the switch. Two paths with identical downside and very different
+    upside: Sharpe narrows the gap, Sortino does not penalise the good days at all."""
+    steady = annual_metrics(make_traj([100.0, 101.0, 100.0, 101.0, 100.0, 101.0]))
+    spiky = annual_metrics(make_traj([100.0, 130.0, 100.0, 130.0, 100.0, 130.0]))
+    assert spiky["downside_deviation"] > steady["downside_deviation"]
+    # Both are penalised for the drawdowns; the point is that the ratio is built on the
+    # loss side only, so the metric is defined by shortfalls rather than by variance.
+    assert spiky["sortino"] == pytest.approx(
+        spiky["annualized_return"] / spiky["downside_deviation"], rel=1e-9)
+
+
+def test_a_strategy_with_no_losing_days_reports_zero_not_infinity():
+    """A degenerate case must not top a ranking."""
+    m = annual_metrics(make_traj([100.0, 101.0, 102.0, 103.0]))
+    assert m["downside_deviation"] == 0.0
+    assert m["sortino"] == 0.0
 
 
 def test_max_drawdown_is_measured_within_the_window():
@@ -171,8 +203,8 @@ def test_the_allocation_tables_sum_to_100_for_every_cell(category_of):
 def test_summary_allocations_sum_to_100(category_of):
     summary = build_summary(_results(category_of), ["a", "b"])
     assert np.allclose(summary[list(CATEGORIES)].sum(axis=1).to_numpy(), 100.0)
-    assert list(summary.columns[:4]) == [
-        "Annual return %", "Return std %", "Sharpe", "Max drawdown %"]
+    assert list(summary.columns[:5]) == [
+        "Annual return %", "Return std %", "Sharpe", "Sortino", "Downside dev %"]
 
 
 def test_summary_max_drawdown_is_the_worst_ANNUAL_drawdown(category_of):

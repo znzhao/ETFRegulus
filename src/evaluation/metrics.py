@@ -52,8 +52,14 @@ def compute_metrics(traj: pd.DataFrame, *, d_max: float | None = None) -> dict:
 
     vol = float(ret.std() * np.sqrt(TRADING_DAYS)) if len(ret) > 1 else 0.0
     ann = _ann_return(nav)
-    downside = ret[ret < 0]
-    downside_vol = float(downside.std() * np.sqrt(TRADING_DAYS)) if len(downside) > 1 else 0.0
+    # Downside deviation, over EVERY observation rather than only the losing ones.
+    # Averaging the squared shortfalls over just the losers flatters a strategy that
+    # loses rarely, and this must agree with `src/evaluation/report.py` -- two different
+    # Sortinos in one codebase is the kind of silent inconsistency that makes a number
+    # unciteable.
+    shortfall = np.minimum(ret.to_numpy(), 0.0)
+    downside_vol = float(np.sqrt(np.mean(shortfall ** 2)) * np.sqrt(TRADING_DAYS)) \
+        if len(ret) else 0.0
     max_dd = float(dd.max())
 
     episodes = drawdown_episodes(dd)

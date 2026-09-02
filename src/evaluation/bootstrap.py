@@ -82,7 +82,7 @@ def metrics_from_returns(returns: np.ndarray) -> dict:
     if returns.size < 2:
         return {k: 0.0 for k in
                 ("total_return", "annualized_return", "volatility", "sharpe",
-                 "max_drawdown", "worst_1d", "worst_5d", "calmar")}
+                 "sortino", "max_drawdown", "worst_1d", "worst_5d", "calmar")}
     nav = np.cumprod(1.0 + returns)
     peak = np.maximum.accumulate(nav)
     max_dd = float((1.0 - nav / peak).max())
@@ -90,6 +90,8 @@ def metrics_from_returns(returns: np.ndarray) -> dict:
     total = float(nav[-1] - 1.0)
     ann = float((1.0 + total) ** (1.0 / years) - 1.0) if years > 0 else 0.0
     vol = float(returns.std(ddof=1) * np.sqrt(TRADING_DAYS))
+    shortfall = np.minimum(returns, 0.0)
+    downside = float(np.sqrt(np.mean(shortfall ** 2)) * np.sqrt(TRADING_DAYS))
     rolling5 = pd.Series(np.log1p(returns)).rolling(5).sum().min()
     return {
         "total_return": total,
@@ -97,6 +99,7 @@ def metrics_from_returns(returns: np.ndarray) -> dict:
         "volatility": vol,
         # rf = 0, matching the report: CASH here returns exactly zero.
         "sharpe": float(ann / vol) if vol > 1e-12 else 0.0,
+        "sortino": float(ann / downside) if downside > 1e-12 else 0.0,
         "max_drawdown": max_dd,
         "calmar": float(ann / max_dd) if max_dd > 1e-12 else 0.0,
         "worst_1d": float(returns.min()),
@@ -163,13 +166,14 @@ def block_length_sensitivity(returns: np.ndarray, *, lengths=BLOCK_LENGTH_SENSIT
         out[str(length)] = {
             key: {"q05": result.bands[key]["q05"], "q50": result.bands[key]["q50"],
                   "q95": result.bands[key]["q95"]}
-            for key in ("annualized_return", "volatility", "sharpe", "max_drawdown")
+            for key in ("annualized_return", "volatility", "sharpe", "sortino",
+                        "max_drawdown")
         }
 
     # A crude but honest summary: how much the 90% band width for the headline metrics
     # moves across block lengths.
     spread = {}
-    for key in ("annualized_return", "max_drawdown", "sharpe"):
+    for key in ("annualized_return", "max_drawdown", "sortino"):
         widths = [out[str(b)][key]["q95"] - out[str(b)][key]["q05"] for b in lengths]
         spread[key] = {"min_width": float(min(widths)), "max_width": float(max(widths)),
                        "ratio": float(max(widths) / max(min(widths), 1e-12))}

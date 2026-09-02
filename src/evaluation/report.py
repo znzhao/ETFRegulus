@@ -23,6 +23,22 @@ the excess return over the risk-free asset *is* the raw return. Using a T-bill s
 instead would make CASH a negative-carry asset that the simulator does not model, and the
 Sharpe ratios would no longer describe the problem the agent actually solved.
 
+**4. Sortino is the headline risk-adjusted measure, not Sharpe.** Sharpe divides by total
+volatility, which penalises upside deviation exactly as hard as downside -- a strategy is
+marked down for having good months. That is the wrong instrument for a system whose entire
+purpose is a *drawdown* constraint: what matters here is the dispersion of losses.
+
+The denominator is the standard **downside deviation**, `sqrt(mean(min(r, 0)^2))`
+annualised, taken over EVERY observation rather than only the negative ones. Averaging the
+squared shortfalls over just the losing days is a common variant and it flatters any
+strategy that loses rarely: a portfolio down on three days out of 250 would be judged on
+the dispersion of those three. The target return is 0, matching the `rf = 0` convention
+above -- CASH earns exactly zero here, so a shortfall is a shortfall against cash.
+
+A strategy with no losing days has zero downside deviation and therefore an undefined
+Sortino; it is reported as 0.0 rather than infinity, so a degenerate case cannot top a
+ranking.
+
 **3. Allocation is the TIME AVERAGE of daily weights over the year**, not a year-end
 snapshot. A snapshot cannot distinguish a portfolio that held 60% equity all year from one
 that held 0% for eleven months and 60% in December. Weights are in percentage points and
@@ -63,10 +79,16 @@ def annual_metrics(traj: pd.DataFrame) -> dict:
     nav = traj["nav"].astype(float)
     if len(nav) < 2:
         return {"total_return": 0.0, "volatility": 0.0, "sharpe": 0.0,
+                "sortino": 0.0, "downside_deviation": 0.0,
                 "max_drawdown": 0.0, "n_sessions": int(len(nav))}
 
     ret = nav.pct_change().dropna()
     total = float(nav.iloc[-1] / nav.iloc[0] - 1.0)
+    # Downside deviation: RMS of the shortfalls below the 0 target, over every
+    # observation. Dividing by the count of losing days instead would flatter a strategy
+    # that loses rarely -- three bad days out of 250 would set the whole denominator.
+    shortfall = np.minimum(ret.to_numpy(), 0.0)
+    downside = float(np.sqrt(np.mean(shortfall ** 2)) * np.sqrt(TRADING_DAYS))
     # Annualized so a partial year (the data ends mid-December, and 2015's XLRE inception
     # year is short for some assets) is comparable to a full one.
     years = len(nav) / TRADING_DAYS
@@ -81,6 +103,10 @@ def annual_metrics(traj: pd.DataFrame) -> dict:
         "volatility": vol,
         # rf = 0: CASH returns exactly zero, so raw return IS excess return.
         "sharpe": float(annualized / vol) if vol > 1e-12 else 0.0,
+        "downside_deviation": downside,
+        # The headline risk-adjusted measure. Undefined with no losing days, and reported
+        # as 0.0 rather than infinity so a degenerate case cannot top a ranking.
+        "sortino": float(annualized / downside) if downside > 1e-12 else 0.0,
         "max_drawdown": max_dd,
         "n_sessions": int(len(nav)),
         "turnover": float(traj["turnover"].sum()) if "turnover" in traj else 0.0,
@@ -155,6 +181,7 @@ def build_tables(results: list[YearResult], strategies: list[str]) -> dict[str, 
         "annual_return": _pivot(results, "total_return", strategies) * 100.0,
         "volatility": _pivot(results, "volatility", strategies) * 100.0,
         "sharpe": _pivot(results, "sharpe", strategies),
+        "sortino": _pivot(results, "sortino", strategies),
         "max_drawdown": _pivot(results, "max_drawdown", strategies) * 100.0,
     }
     for category in CATEGORIES:
@@ -223,6 +250,11 @@ def build_summary(results: list[YearResult], strategies: list[str]) -> pd.DataFr
         n_years = len(mine)
         ann = float(growth ** (1.0 / n_years) - 1.0) if n_years else 0.0
         vol = float(daily.std(ddof=1) * np.sqrt(TRADING_DAYS)) if len(daily) > 1 else 0.0
+        # Pooled over every daily return in the window, like the volatility beside it --
+        # not an average of the annual Sortinos, which would weight a quiet year and a
+        # crisis year equally.
+        shortfall = np.minimum(daily.to_numpy(), 0.0)
+        downside = float(np.sqrt(np.mean(shortfall ** 2)) * np.sqrt(TRADING_DAYS))
         worst_dd = float(max(r.metrics["max_drawdown"] for r in mine))
 
         row = {
@@ -230,6 +262,8 @@ def build_summary(results: list[YearResult], strategies: list[str]) -> pd.DataFr
             "Annual return %": 100.0 * ann,
             "Return std %": 100.0 * vol,
             "Sharpe": (ann / vol) if vol > 1e-12 else 0.0,
+            "Sortino": (ann / downside) if downside > 1e-12 else 0.0,
+            "Downside dev %": 100.0 * downside,
             "Max drawdown %": 100.0 * worst_dd,
         }
         for category in CATEGORIES:
