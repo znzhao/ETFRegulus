@@ -50,6 +50,13 @@ def _add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mean-block", type=float, default=DEFAULT_MEAN_BLOCK)
     p.add_argument("--walk-forward", default=None, help="Stage 8 run id or directory")
     p.add_argument("--skip-baselines", action="store_true")
+    p.add_argument("--baseline-report", default="baselines",
+                   help="Stage 12 report directory the baseline series come from; it "
+                        "must have been generated at the SAME (N, D_max) cell")
+    p.add_argument("--cell", default=None,
+                   help="Stage 8 (N, D_max) cell to bootstrap, e.g. N30_D0.05. The "
+                        "policy is parameter-conditioned, so another cell is the same "
+                        "trained model under a different mandate.")
 
 
 def newest_walk_forward(explicit: str | None) -> Path:
@@ -64,17 +71,24 @@ def newest_walk_forward(explicit: str | None) -> Path:
     return runs[-1].parent
 
 
-def load_fold_trajectories(run_dir: Path) -> list[pd.DataFrame]:
-    paths = sorted(run_dir.glob("folds/*/trajectory.parquet"))
+def load_fold_trajectories(run_dir: Path, cell: str | None = None) -> list[pd.DataFrame]:
+    pattern = f"folds/*/cells/{cell}.parquet" if cell else "folds/*/trajectory.parquet"
+    paths = sorted(run_dir.glob(pattern))
     if not paths:
-        raise StageError(f"no fold trajectories under {run_dir}")
+        raise StageError(f"no trajectories matching {pattern!r} under {run_dir}")
     return [pd.read_parquet(p) for p in paths]
 
 
-def load_baseline_returns() -> dict[str, np.ndarray]:
-    """Each baseline's walk-forward-comparable return series, from the Stage 12 report."""
+def load_baseline_returns(report: str = "baselines") -> dict[str, np.ndarray]:
+    """Each baseline's return series, from a Stage 12 report directory.
+
+    The report name is a PARAMETER, not a constant. Each report is generated at a
+    specific `(N, D_max)` cell, so bootstrapping the policy at one ceiling against
+    baselines saved at another would be an apples-to-oranges comparison that looks
+    perfectly ordinary in the output.
+    """
     out: dict[str, np.ndarray] = {}
-    for directory in sorted(glob.glob("artifacts/reports/baselines/trajectories/*")):
+    for directory in sorted(glob.glob(f"artifacts/reports/{report}/trajectories/*")):
         name = Path(directory).name
         frames = [pd.read_parquet(p)
                   for p in sorted(glob.glob(f"{directory}/*.parquet"))]
@@ -97,7 +111,7 @@ def main(resolved: dict, ctx: StageContext) -> None:
     wf_dir = newest_walk_forward(args.walk_forward)
     ctx.log(f"walk-forward run: {wf_dir}")
 
-    trajectories = load_fold_trajectories(wf_dir)
+    trajectories = load_fold_trajectories(wf_dir, args.cell)
     returns = portfolio_returns(trajectories)
     ctx.log(f"{len(trajectories)} fold trajectories -> {returns.size} daily returns")
     if returns.size < 100:
@@ -139,7 +153,7 @@ def main(resolved: dict, ctx: StageContext) -> None:
         ctx.log("")
         ctx.log("baselines, same machinery")
         baselines = {}
-        for name, series in load_baseline_returns().items():
+        for name, series in load_baseline_returns(args.baseline_report).items():
             if series.size < 100:
                 continue
             b = bootstrap(series, replicates=args.replicates, method=args.method,
@@ -150,6 +164,7 @@ def main(resolved: dict, ctx: StageContext) -> None:
                     f"q95 {b.bands['annualized_return']['q95']:>+7.2%}  "
                     f"maxDD q95 {b.bands['max_drawdown']['q95']:>6.2%}")
         summary["baselines"] = baselines
+        summary["baseline_report"] = args.baseline_report
 
     out = ctx.out_path("bootstrap_summary.json")
     out.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")

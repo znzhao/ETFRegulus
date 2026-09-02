@@ -71,26 +71,42 @@ def _latest(pattern: str) -> dict | None:
     return json.loads(found[-1].read_text(encoding="utf-8"))
 
 
-def policy_year_results(spec: str, category_of: dict, ctx) -> list[YearResult]:
+def policy_year_results(spec: str, category_of: dict, ctx,
+                        cell: str | None = None) -> list[YearResult]:
     """The Stage 8 per-fold trajectories, as report rows.
 
     They need no adaptation: walk-forward already evaluates one trained model per test
     year over that year alone, which is exactly this report's independent-window
     convention. The RL column is therefore the same measurement as every baseline column,
     not a differently-computed number placed beside them.
+
+    `cell` selects a specific `(N, D_max)` grid cell instead of the fold's headline
+    trajectory. This is not a re-fit and needs no retraining: `N` and `D_max` enter the
+    observation, so one policy serves the whole grid by construction (env-mdp.md 4).
+    Reading a different cell asks the same trained model what it does under a different
+    mandate -- which is the entire point of conditioning on the parameters.
     """
     directory = (sorted(RUNS.glob("s08_walk_forward_*"))[-1] if spec in ("latest", "")
                  else (Path(spec) if Path(spec).exists() else RUNS / spec))
-    paths = sorted(directory.glob("folds/*/trajectory.parquet"))
+    pattern = f"folds/*/cells/{cell}.parquet" if cell else "folds/*/trajectory.parquet"
+    paths = sorted(directory.glob(pattern))
     if not paths:
-        raise StageError(f"no fold trajectories under {directory}")
-    ctx.log(f"rl_policy: {len(paths)} fold trajectories from {directory.name}")
+        available = sorted({q.stem for q in directory.glob("folds/*/cells/*.parquet")})
+        raise StageError(
+            f"no trajectories matching {pattern!r} under {directory}."
+            + (f" Cells available: {available}" if available else ""))
+
+    def year_of(path: Path) -> int:
+        return int(path.parent.name if cell is None else path.parent.parent.name)
+
+    ctx.log(f"rl_policy: {len(paths)} fold trajectories from {directory.name}"
+            + (f", cell {cell}" if cell else ""))
 
     out = []
     for path in paths:
         traj = pd.read_parquet(path)
         out.append(YearResult(
-            strategy="rl_policy", year=int(path.parent.name), trajectory=traj,
+            strategy="rl_policy", year=year_of(path), trajectory=traj,
             metrics=annual_metrics(traj),
             allocation=category_allocation(traj, category_of)))
     return out
@@ -111,6 +127,11 @@ def _add_args(p: argparse.ArgumentParser) -> None:
                         "the `rl_policy` column; 'latest' picks the newest")
     p.add_argument("--no-acceptance", action="store_true",
                    help="skip the acceptance table (it needs Stages 8-11)")
+    p.add_argument("--policy-cell", default=None,
+                   help="which Stage 8 (N, D_max) cell the rl_policy column comes from, "
+                        "e.g. N30_D0.05. Defaults to the fold's headline trajectory. The "
+                        "policy is parameter-conditioned, so evaluating the SAME trained "
+                        "model at another cell is the design working, not a re-fit.")
 
 
 # --------------------------------------------------------------------- the run
@@ -377,7 +398,8 @@ def main(resolved: dict, ctx: StageContext) -> None:
         from src.config.schema import UniverseConfig
 
         ucfg, _ = load_typed(resolved["universe_config"], UniverseConfig)
-        policy_rows = policy_year_results(args.policy_runs, ticker_to_category(ucfg), ctx)
+        policy_rows = policy_year_results(args.policy_runs, ticker_to_category(ucfg),
+                                          ctx, cell=args.policy_cell)
         # Only the years both sides actually cover, so no column is compared against a
         # different span than its neighbours.
         shared = {r.year for r in policy_rows} & set(years)
@@ -405,14 +427,18 @@ def main(resolved: dict, ctx: StageContext) -> None:
                 if name == "rl_policy":
                     continue
                 better = float(rl["Sharpe"]) > float(summary.loc[name, "Sharpe"])
+                note = ("POINT ESTIMATE ONLY, and on 13 years it carries no "
+                        "significance: read the Stage 10 bootstrap bands before "
+                        "treating a pass here as a result.")
+                if name == "spy_tlt_60_40":
+                    note = ("the bar that matters -- a two-line static allocation "
+                            "anyone could implement. " + note)
                 comparison["beats"][name] = {
                     "passed": better,
                     "observed": (f"Sharpe {rl['Sharpe']:.2f} vs "
                                  f"{summary.loc[name, 'Sharpe']:.2f}"),
                     "requirement": "higher Sharpe than the baseline",
-                    "note": ("the bar that matters is spy_tlt_60_40: a two-line static "
-                             "allocation anyone could implement"
-                             if name == "spy_tlt_60_40" else ""),
+                    "note": note,
                 }
         acceptance = build_acceptance(wf, st, bs, adv, comparison)
         ctx.log("")
