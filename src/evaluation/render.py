@@ -241,6 +241,19 @@ td.nil{color:var(--ink-3)}
 .seg{display:flex; align-items:center; justify-content:center; min-width:0}
 .segtxt{font:500 10.5px/1 "IBM Plex Mono",monospace; color:#fff; opacity:.92;
         font-variant-numeric:tabular-nums}
+.verdict{font:500 15px/1.55 "IBM Plex Sans",sans-serif; padding:.7rem 1rem;
+           border-radius:5px; border:1px solid var(--rule); background:var(--surface);
+           margin:1rem 0 .5rem}
+ .verdict.ok{border-left:3px solid var(--pos)}
+ .verdict.bad{border-left:3px solid var(--neg)}
+ .pill{font:500 11px/1 "IBM Plex Mono",monospace; padding:.28rem .5rem;
+        border-radius:3px; display:inline-block; letter-spacing:.04em}
+ .pill.ok{background:rgba(18,112,90,.16); color:var(--pos)}
+ .pill.bad{background:rgba(163,53,44,.16); color:var(--neg)}
+ td.txt{font:400 12.5px/1.45 "IBM Plex Sans",sans-serif; text-align:left;
+        white-space:normal; max-width:34ch}
+ tbody th .sub{font:400 11.5px/1.4 "IBM Plex Sans",sans-serif; color:var(--ink-3);
+               display:block; max-width:38ch; white-space:normal}
 .note{font-size:13.5px; color:var(--ink-3); margin:-.15rem 0 .9rem; max-width:72ch}
 pre{background:var(--surface); border:1px solid var(--rule); border-radius:6px;
     padding:.8rem 1rem; overflow-x:auto; font:400 12.5px/1.6 "IBM Plex Mono",monospace;
@@ -251,8 +264,47 @@ pre{background:var(--surface); border:1px solid var(--rule); border-radius:6px;
 """
 
 
+def _acceptance_html(acceptance) -> str:
+    """Explicit pass/fail, with the blocking and non-blocking groups kept apart.
+
+    A hard-engineering failure fails the model outright; a performance shortfall is a
+    finding reported as measured. Collapsing the two into one verdict is how a broken
+    safety layer gets excused as bad luck -- and, in the other direction, how a merely
+    unimpressive result gets called broken.
+    """
+    if acceptance is None:
+        return ""
+    groups = {"hard_engineering": "Hard engineering &mdash; all must be exactly zero",
+              "risk_reporting": "Risk reporting &mdash; all must be present",
+              "performance": "Performance &mdash; reported as measured, non-blocking"}
+    d = acceptance.to_dict()
+    verdict = "PASS" if acceptance.passed else "FAIL"
+    cls = "ok" if acceptance.passed else "bad"
+    out = ["<h2 id='acceptance'>Acceptance</h2>",
+           f"<p class='verdict {cls}'>Blocking criteria: <b>{verdict}</b> "
+           f"&nbsp;&middot;&nbsp; {d['n_passed']} of {d['n_criteria']} criteria pass"
+           "</p>"]
+    for key, title in groups.items():
+        rows = acceptance.group(key)
+        if not rows:
+            continue
+        out.append(f"<h3>{title}</h3><div class='scroll'><table><thead><tr>"
+                   "<th scope='col'>Criterion</th><th scope='col'>Observed</th>"
+                   "<th scope='col'>Requirement</th><th scope='col'>Result</th>"
+                   "</tr></thead><tbody>")
+        for c in rows:
+            mark = ("<span class='pill ok'>PASS</span>" if c.passed
+                    else "<span class='pill bad'>FAIL</span>")
+            note = f"<br><span class='sub'>{c.note}</span>" if c.note else ""
+            out.append(f"<tr><th scope='row'>{c.name}{note}</th>"
+                       f"<td class='txt'>{c.observed}</td>"
+                       f"<td class='txt'>{c.requirement}</td><td>{mark}</td></tr>")
+        out.append("</tbody></table></div>")
+    return "".join(out)
+
+
 def render_page(summary: pd.DataFrame, tables: dict, meta: dict,
-                compliance: pd.DataFrame) -> str:
+                compliance: pd.DataFrame, acceptance=None) -> str:
     """The whole report as one self-contained fragment."""
     perf = summary[["Annual return %", "Return std %", "Sharpe", "Max drawdown %"]]
     dmax_pct = f"{meta['max_drawdown']:.0%}"
@@ -270,6 +322,7 @@ def render_page(summary: pd.DataFrame, tables: dict, meta: dict,
     toc = ["<div class='tocgrp'>Report</div>",
            "<a href='#how'>How to read this</a>",
            "<a href='#summary'>Summary</a>",
+           "<a href='#acceptance'>Acceptance</a>",
            "<a href='#compliance'>Constraint compliance</a>",
            "<div class='tocgrp'>Year by year</div>"]
     toc += [f"<a href='#{i}'>{t}</a>" for i, t, _, _, _, _, _, _ in year_tables]
@@ -294,6 +347,7 @@ def render_page(summary: pd.DataFrame, tables: dict, meta: dict,
         "them.</p></div>")
 
     add(_stat_cards(summary))
+    add(_acceptance_html(acceptance))
 
     add("<h2 id='how'>How to read this</h2>")
     add("<dl class='conv'>")

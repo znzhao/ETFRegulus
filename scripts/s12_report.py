@@ -39,6 +39,7 @@ import pandas as pd
 from src.cli.stage import StageContext, StageError, stage
 from src.config.loader import load_typed
 from src.config.schema import UniverseConfig
+from src.evaluation.acceptance import build as build_acceptance
 from src.evaluation.categories import CATEGORIES, ticker_to_category
 from src.evaluation.report import (
     YearResult,
@@ -60,6 +61,39 @@ from src.evaluation.render import render_page
 from src.sim.simulator import simulate
 
 REPORTS = Path("artifacts/reports")
+RUNS = Path("artifacts/runs")
+
+
+def _latest(pattern: str) -> dict | None:
+    found = sorted(RUNS.glob(pattern))
+    if not found:
+        return None
+    return json.loads(found[-1].read_text(encoding="utf-8"))
+
+
+def policy_year_results(spec: str, category_of: dict, ctx) -> list[YearResult]:
+    """The Stage 8 per-fold trajectories, as report rows.
+
+    They need no adaptation: walk-forward already evaluates one trained model per test
+    year over that year alone, which is exactly this report's independent-window
+    convention. The RL column is therefore the same measurement as every baseline column,
+    not a differently-computed number placed beside them.
+    """
+    directory = (sorted(RUNS.glob("s08_walk_forward_*"))[-1] if spec in ("latest", "")
+                 else (Path(spec) if Path(spec).exists() else RUNS / spec))
+    paths = sorted(directory.glob("folds/*/trajectory.parquet"))
+    if not paths:
+        raise StageError(f"no fold trajectories under {directory}")
+    ctx.log(f"rl_policy: {len(paths)} fold trajectories from {directory.name}")
+
+    out = []
+    for path in paths:
+        traj = pd.read_parquet(path)
+        out.append(YearResult(
+            strategy="rl_policy", year=int(path.parent.name), trajectory=traj,
+            metrics=annual_metrics(traj),
+            allocation=category_allocation(traj, category_of)))
+    return out
 
 
 def _add_args(p: argparse.ArgumentParser) -> None:
@@ -73,8 +107,10 @@ def _add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hold-days", type=int, default=None)
     p.add_argument("--max-drawdown", type=float, default=None)
     p.add_argument("--policy-runs", default=None,
-                   help="comma-separated Stage 8 run ids to include as extra columns "
-                        "(not yet produced by any stage; the plumbing is here)")
+                   help="Stage 8 run id or directory whose per-fold trajectories become "
+                        "the `rl_policy` column; 'latest' picks the newest")
+    p.add_argument("--no-acceptance", action="store_true",
+                   help="skip the acceptance table (it needs Stages 8-11)")
 
 
 # --------------------------------------------------------------------- the run
@@ -324,11 +360,6 @@ def main(resolved: dict, ctx: StageContext) -> None:
 
     names = (resolved.get("baselines", {}) or {}).get("names", [])
     strategies = [s.strip() for s in args.only.split(",")] if args.only else list(names)
-    if args.policy_runs:
-        raise StageError(
-            "--policy-runs needs Stage 8 walk-forward artifacts, which do not exist yet. "
-            "Run without it to produce the baseline-only reference report."
-        )
 
     constraints = build_constraints(resolved)
     hold_days = args.hold_days or constraints.lock.hold_days.primary
@@ -341,9 +372,56 @@ def main(resolved: dict, ctx: StageContext) -> None:
     if not results:
         raise StageError("no results")
 
+    if args.policy_runs:
+        from src.config.loader import load_typed
+        from src.config.schema import UniverseConfig
+
+        ucfg, _ = load_typed(resolved["universe_config"], UniverseConfig)
+        policy_rows = policy_year_results(args.policy_runs, ticker_to_category(ucfg), ctx)
+        # Only the years both sides actually cover, so no column is compared against a
+        # different span than its neighbours.
+        shared = {r.year for r in policy_rows} & set(years)
+        results = [r for r in results if r.year in shared]
+        results += [r for r in policy_rows if r.year in shared]
+        years = sorted(shared)
+        strategies = ["rl_policy", *strategies]
+        ctx.log(f"comparing over {len(years)} shared year(s): {years[0]}-{years[-1]}")
+
     tables = build_tables(results, strategies)
     summary = build_summary(results, strategies)
     compliance = build_compliance(results, strategies, max_drawdown)
+
+    acceptance = None
+    if not args.no_acceptance:
+        wf = _latest("s08_walk_forward_*/walk_forward_summary.json")
+        st = _latest("s09_stress_*/stress_summary.json")
+        bs = _latest("s10_bootstrap_*/bootstrap_summary.json")
+        adv = _latest("s11_adversarial_*/adversarial_summary.json")
+        comparison = None
+        if "rl_policy" in summary.index:
+            comparison = {"beats": {}}
+            rl = summary.loc["rl_policy"]
+            for name in summary.index:
+                if name == "rl_policy":
+                    continue
+                better = float(rl["Sharpe"]) > float(summary.loc[name, "Sharpe"])
+                comparison["beats"][name] = {
+                    "passed": better,
+                    "observed": (f"Sharpe {rl['Sharpe']:.2f} vs "
+                                 f"{summary.loc[name, 'Sharpe']:.2f}"),
+                    "requirement": "higher Sharpe than the baseline",
+                    "note": ("the bar that matters is spy_tlt_60_40: a two-line static "
+                             "allocation anyone could implement"
+                             if name == "spy_tlt_60_40" else ""),
+                }
+        acceptance = build_acceptance(wf, st, bs, adv, comparison)
+        ctx.log("")
+        ctx.log(f"acceptance: {acceptance.to_dict()['n_passed']}/"
+                f"{acceptance.to_dict()['n_criteria']} criteria pass; "
+                f"blocking failures: {acceptance.blocking_failures or 'none'}")
+        (out_dir_early := REPORTS / args.name).mkdir(parents=True, exist_ok=True)
+        (out_dir_early / "acceptance.json").write_text(
+            json.dumps(acceptance.to_dict(), indent=2), encoding="utf-8")
 
     sha, dirty = git_state()
     default_title = ("Constrained Baseline Scorecard" if args.name == "baselines"
@@ -361,7 +439,7 @@ def main(resolved: dict, ctx: StageContext) -> None:
     (out_dir / "report.md").write_text(
         render_markdown(summary, tables, meta, compliance), encoding="utf-8")
     (out_dir / "report.html").write_text(
-        render_page(summary, tables, meta, compliance), encoding="utf-8")
+        render_page(summary, tables, meta, compliance, acceptance), encoding="utf-8")
     summary.to_csv(out_dir / "summary.csv")
     compliance.to_csv(out_dir / "compliance.csv")
     for key, frame in tables.items():

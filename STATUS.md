@@ -11,7 +11,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Stage 8 PASSED — the Phase 3 gate is open.** Next: Stage 9, the stress suite |
+| **Current stage** | **Phase 3 complete.** Stages 9–12 green; the acceptance table has **zero blocking failures**. Next: the full-budget training run |
 | **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
 | **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
@@ -38,6 +38,10 @@ to end from a clean checkout.
 | **Phase 2** | 6 — Env smoke test | `s06_smoke_env` | T8, T9, T14 + zero violations | `[x]` 7/7 checks, 31,500 steps, 0 violations |
 | | 7 — Train PPO | `s07_train_ppo` | per-rung: beats `cash`, zero violations | `[x]` 5/5 rungs green (demonstration budget) |
 | | **8 — Walk-forward** | `s08_walk_forward` | **T11, T12, T13 + hard acceptance** | `[x]` **13/13 folds, hard acceptance PASSED** |
+| **Phase 3** | 9 — Stress | `s09_stress` | `D_max` monotonicity | `[x]` monotone at every `N`; 29 cells |
+| | 10 — Bootstrap | `s10_bootstrap` | bands + block-length sensitivity | `[x]` 1,000 replicates, sensitivity stable |
+| | 11 — Adversarial | `s11_adversarial` | 4 scenarios, disclaimer present | `[x]` zero violations on all 4 |
+| | 12 — Report | `s12_report` | acceptance table, explicit pass/fail | `[x]` 18/22, **0 blocking failures** |
 | **Phase 3** | 12 — Report *(comparison half)* | `s12_report` | allocations sum to 100, zero violations | `[~]` baseline reference report built; acceptance table awaits Stages 8–11 |
 
 **Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
@@ -425,34 +429,94 @@ What the run established beyond the gate:
 
 ---
 
-## Phase 3 — Robustness  `[ ]` — **unblocked**: Stage 8 is `[x]` and hard acceptance passed (D12)
+## Phase 3 — Robustness  `[x]` — complete
 
-### `[ ]` Stage 9 — Stress · `python -m scripts.s09_stress --config config/evaluation.yaml --policy <path>`
+### `[x]` Stage 9 — Stress · `python -m scripts.s09_stress --config config/evaluation.yaml`
 
-- [ ] Crisis windows (GFC, COVID, 2022, taper, volmageddon, 2018Q4)
-- [ ] `N` sensitivity sweep
-- [ ] `D_max` sensitivity sweep
-- [ ] Combined grid (3×3 default; `--grid full` for 7×5)
-- [ ] **Gate:** realized drawdown monotone non-decreasing in `D_max`
+- [x] Crisis windows (GFC, COVID, 2022, taper, volmageddon, 2018Q4)
+- [x] `N` sensitivity sweep — 9 values, `{0, 7, 90, 180}` labelled out-of-distribution
+- [x] `D_max` sensitivity sweep — 5 values
+- [x] Combined grid (3×3 default; `--grid full` for 9×5)
+- [x] **Gate:** realized drawdown monotone non-decreasing in `D_max` — **PASSED at every `N`**
 
-### `[ ]` Stage 10 — Bootstrap · `python -m scripts.s10_bootstrap --config config/evaluation.yaml`
+**The gate, which is the single most important robustness check in the project:**
 
-- [ ] Stationary / moving-block over the **joint** cross-section
-- [ ] 1000 replicates; confidence bands for every standard metric
-- [ ] Block-length sensitivity reported
+| `D_max` | 0.05 | 0.10 | 0.15 | 0.20 | 0.25 |
+|---|---|---|---|---|---|
+| realized max DD (`N=30`) | 6.60% | 13.54% | 17.83% | 23.52% | 29.92% |
+| mean cash weight | 98.3% | 77.1% | 79.4% | 76.8% | 73.9% |
+| intervention rate | 99.6% | 85.3% | 79.7% | 76.7% | 74.3% |
 
-### `[ ]` Stage 11 — Adversarial · `python -m scripts.s11_adversarial --config config/evaluation.yaml`
+Monotone at `N = 15`, `30` and `60` alike. A tighter ceiling never produced a deeper drawdown.
 
-- [ ] Equity shock + credit widening; duration loss; correlation spike; diversification breakdown
-- [ ] Blocks drawn from real history only
-- [ ] "historical robustness, not a forward-looking guarantee" disclaimer in every output
+**The lock is binding, not inert.** Turnover falls **1,151 → 3.1** as `N` goes 0 → 180 (ratio 373×), and
+the locked NAV fraction rises from 0% to ~20–27%. robustness.md §1.2 warns that a flat sweep is
+indistinguishable from a silently-inert constraint; this is not flat.
 
-### `[ ]` Stage 12 — Report · `python -m scripts.s12_report --config config/evaluation.yaml --runs <ids>`
+**Two findings worth carrying forward:**
 
-- [ ] Acceptance table: hard engineering / risk reporting / performance, explicit pass-fail
-- [ ] A vs B violation tables kept separate
-- [ ] Baseline comparison incl. `classical constrained`
-- [ ] Refuses dirty-git runs unless `--allow-dirty`
+- **COVID is where the lock hurts.** Over 2020-02-19 → 2020-03-23 the policy took a **43.5% drawdown with
+  95.7% of NAV locked** and 239 actions blocked. That window is precisely the one robustness.md flags —
+  a 34% index fall in 23 sessions, faster than any `N` can release — and the answer is that the lock does
+  trap the agent. Zero preventable violations: the machinery behaved, the constraint simply bit.
+- **`D_max = 0.05` is qualitatively different.** 99.6% intervention and 98.3% cash: at the tightest ceiling
+  the envelope is effectively forcing an all-cash portfolio. That is the over-calibration signal from
+  risk-envelope.md §7, and it should be reported separately rather than averaged into the grid.
+
+### `[x]` Stage 10 — Bootstrap · `python -m scripts.s10_bootstrap --config config/evaluation.yaml`
+
+- [x] Stationary (Politis–Romano) block bootstrap over the **joint** cross-section
+- [x] 1,000 replicates; confidence bands for every standard metric
+- [x] Block-length sensitivity reported — `[5, 10, 21, 63]`, band width moves ≤ **1.19×**, so the
+      conclusions do not depend on the choice
+
+| Metric | observed | q05 | q50 | q95 |
+|---|---|---|---|---|
+| annualized return | 6.46% | 1.45% | 6.45% | 12.37% |
+| volatility | 11.73% | 10.97% | 11.70% | 12.51% |
+| Sharpe | 0.55 | 0.12 | 0.55 | 1.04 |
+| max drawdown | 23.22% | 14.68% | 22.61% | 36.70% |
+
+Blocks are drawn over **sessions**, so the same indices apply to every asset at once and the cross-asset
+correlation survives by construction. IID resampling is refused by name — it destroys the volatility
+clustering the whole risk layer exists to handle.
+
+### `[x]` Stage 11 — Adversarial · `python -m scripts.s11_adversarial --config config/evaluation.yaml`
+
+- [x] Equity shock + credit widening; duration loss; correlation spike; diversification breakdown
+- [x] Blocks drawn from real history only, and from the fold's **training** window
+- [x] "historical robustness, not a forward-looking guarantee" disclaimer in every output
+- [x] **Zero lock, zero feasibility, zero preventable violations on all four paths**
+
+| Scenario | policy return | policy maxDD | `spy_tlt_60_40` | `equal_weight` |
+|---|---|---|---|---|
+| equity shock + credit widening | −12.89% | 24.03% | −15.05% | −23.18% |
+| duration loss | −0.00% | 0.01% | −18.23% | −20.09% |
+| correlation spike | −7.38% | 7.79% | −1.46% | +1.28% |
+| diversification breakdown | −7.43% | 9.74% | −3.94% | −0.83% |
+
+Read the duration-loss row carefully before celebrating it: the policy sat in cash (0.8% locked) through a
+window it had every reason to avoid, so the −0.00% is risk avoidance, not skill — and the correlation-spike
+and diversification rows show it **losing to both baselines** on the paths designed to punish exactly the
+"bonds are safe" reflex.
+
+### `[x]` Stage 12 — Report · `python -m scripts.s12_report --config config/evaluation.yaml --policy-runs latest`
+
+- [x] Acceptance table: hard engineering / risk reporting / performance, explicit pass-fail
+- [x] A vs B violation tables kept separate — never summed
+- [x] Baseline comparison incl. `classical_optimizer`, with `rl_policy` as one more column
+- [ ] Refuses dirty-git runs unless `--allow-dirty` *(not implemented; the manifest records
+      `git_dirty` but the stage does not yet refuse on it)*
+
+**Acceptance: 18/22 criteria pass, ZERO blocking failures.** All four failures are non-blocking
+performance criteria — the policy's Sharpe of 0.55 loses to `spy_buy_hold` (0.97), `spy_tlt_60_40` (0.90),
+`equal_weight` (0.77) and `momentum` (0.64); it beats `cash` and `classical_optimizer`.
+
+> **What Phase 3 establishes, stated precisely.** Every hard engineering criterion is zero across
+> walk-forward, the stress grid and the adversarial paths. The constraint machinery is correct and its
+> limits are measured. It establishes **nothing** about whether the policy is good: it was trained at
+> ~2% of the configured budget, and at that budget it does not clear the bar rl-training.md §7 sets —
+> beating a two-line static allocation.
 
 ---
 
@@ -523,6 +587,14 @@ until it is built.
 | 2026-09-01 | **The lock is what empties the risk envelope's feasible set.** With `N = 0`, `w_safe` is all cash and the fallback fires on 0.7% of steps at `D_max = 0.05`; with `N = 30` it fires on **28.5%**, though the envelope *binds* less often. The lock floors `w_safe` at holdings that carry real risk. Recorded in [reference/risk-envelope.md](reference/risk-envelope.md) §6b; it makes `infeasible_fallback` a first-class Stage 7 diagnostic and `D_max = 0.05` a cell to report separately. |
 | 2026-09-01 | **`src/sim/engine.py` extracted.** The per-step body is now shared verbatim between `simulate()` and `env.step`, so a baseline and a policy cannot drift onto different machinery — which was the whole reason for running the baselines through the simulator. Stage 4/5 behaviour is unchanged: all 108 Phase-1 tests still pass. |
 | 2026-09-01 | **Q2 closed: `n_envs = 8`, `SubprocVecEnv`** (2,844 steps/s). 8 → 16 workers buys 3.7% for twice the processes. |
+| 2026-09-02 | **Phase 3 complete.** Stages 9-12 green; acceptance is 18/22 with **zero blocking failures**. Every hard engineering criterion is zero across walk-forward, the stress grid and the adversarial paths. |
+| 2026-09-02 | **The `D_max` monotonicity gate PASSED** at `N = 15, 30, 60`: realized drawdown runs 6.60% → 13.54% → 17.83% → 23.52% → 29.92% as the ceiling loosens. This is the check that, had it failed, would have voided every risk number in the report. |
+| 2026-09-02 | **The lock is measurably binding.** Turnover falls 1,151 → 3.1 as `N` goes 0 → 180 (373×), locked NAV rises to ~27%. robustness.md §1.2 warns a flat sweep is indistinguishable from an inert constraint; it is not flat. |
+| 2026-09-02 | **COVID traps the agent, as designed to be tested.** 43.5% drawdown with 95.7% of NAV locked over 2020-02-19..03-23 — a fall faster than any `N` can release — with zero preventable violations. The machinery behaved; the constraint bit. |
+| 2026-09-02 | **`D_max = 0.05` is over-calibrated:** 99.6% intervention, 98.3% cash. Report it separately rather than averaging it into the grid. |
+| 2026-09-02 | **The adversarial splice chains RETURNS, never price levels**, and replays blocks **chronologically**. Two bugs found by doing so: seeding all asset levels at row 0 leaves anything not yet born (GLD, XLRE) at NaN forever, so the availability mask promised tickers the price grid lacked; and score-ordered blocks run backwards through time, letting a held ETF un-exist — an illegal state (I5), not an adversarial one. |
+| 2026-09-02 | **Combination scenarios must exclude each other's blocks.** The worst equity window and the worst credit window are usually the same window — 2008 hit both — so "equity shock + credit widening" silently became "the 2008 crash, twice" until the groups were made disjoint. |
+| 2026-09-02 | **Suite runtime is ~175 s, not the 60 s recorded earlier — and it is not a regression.** The identical Stage 7 commit, checked out in a worktree, measures the same 104 s for `tests/sim` alone. The cost is `_dual_theta`'s bisection (already converging in ~53 iterations) over many full-history simulations; the machine is simply slower than when 60 s was recorded. |
 | 2026-09-01 | **Stage 8 PASSED — the Phase 3 gate is open.** 13 folds, 4 candidates each, 9 evaluation cells per fold: zero lock, zero feasibility, zero preventable `D_max` violations, and no fold marked `constraint validation failure`. T11, T12 and T13 all have homes and pass; every test in [testing.md](reference/testing.md) §3 is now covered. |
 | 2026-09-01 | **The preventable-violation detector needs the dividend stream, and this was found the hard way.** Its first real run produced **164 false positives** on `equal_weight` 2020 alone. A trajectory records shares *after* distributions are reinvested as accretion, and accretion is deliberately exempt from both the lock and the capital-preservation cap. The fix is exact — `shares_close = shares_executed × (1 + div/close)` inverts cleanly — and a threshold would not have worked: XLE paid \$0.2637 on 2020-03-23 into a collapsed \$11.79 price, a **2.24% one-day accretion** no fixed band separates from dip-buying. Corrected in [evaluation.md](reference/evaluation.md) §4. |
 | 2026-09-01 | **`trajectory.parquet` records `proj_weights` and `raw_weights`.** The taxonomy specifies a *replay*, and a replay needs the action the projection actually produced. Inferring legality from the resulting position is much weaker — prices move between the decision and the close. |
