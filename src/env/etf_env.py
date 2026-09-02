@@ -76,7 +76,7 @@ class EnvConfig:
 
     hold_days_values: tuple[int, ...] = (15, 21, 30, 42, 60)
     hold_days_weights: tuple[float, ...] | None = (0.15, 0.20, 0.30, 0.20, 0.15)
-    max_drawdown_values: tuple[float, ...] = (0.05, 0.10, 0.15, 0.20, 0.25)
+    max_drawdown_values: tuple[float, ...] = (0.001, 0.005, 0.01, 0.05, 0.10)
     max_drawdown_weights: tuple[float, ...] | None = None
     episode_lengths: tuple[int, ...] = EPISODE_LENGTHS
     window: tuple[str, str] | None = None

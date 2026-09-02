@@ -54,7 +54,7 @@ from src.training.trainer import train_stage
 
 #: The default evaluation grid: 3x3 out of the full 5x5 (D5 compute sizing).
 DEFAULT_GRID_N = (15, 30, 60)
-DEFAULT_GRID_D = (0.05, 0.15, 0.25)
+DEFAULT_GRID_D = (0.01, 0.05, 0.10)
 
 
 def _add_args(p: argparse.ArgumentParser) -> None:

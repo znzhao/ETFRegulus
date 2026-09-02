@@ -130,7 +130,7 @@ class MarketData:
 @dataclass
 class SimulationConfig:
     hold_days: int = 30
-    max_drawdown: float = 0.15
+    max_drawdown: float = 0.05
     cost_bps: float = 0.0
     initial_cash: float = 1_000_000.0
     lock_scope: str = "per_etf"
