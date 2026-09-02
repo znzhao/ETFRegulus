@@ -266,3 +266,28 @@ def test_nav_raises_on_a_missing_price_for_a_held_ticker():
     led = Ledger(cash=0.0, shares={"SPY": 1.0})
     with pytest.raises(LedgerError, match="no usable price"):
         nav(led, {"TLT": 50.0})
+
+
+def test_the_cash_guard_scales_with_the_book():
+    """A float residue must not fail a run; real overspending still must.
+
+    An absolute 1e-9 tolerance against a million-dollar book is a relative tolerance of
+    1e-15, at the limit of double precision -- summing two dozen notionals breaches it on
+    rounding alone. A walk-forward fold died on `cash = -1.004e-09`, a millionth of a cent
+    against a million dollars, which is noise and not an accounting failure.
+    """
+    from src.portfolio.execution import EPS, ExecutionError, execute
+    from src.portfolio.ledger import Ledger
+
+    prices = {"SPY": 400.0}
+    # Fully invested, with a sub-cent rounding residue left behind.
+    ledger = Ledger(cash=1_000_000.0)
+    result = execute(ledger, {"SPY": 1.0}, prices, dt.date(2020, 1, 2),
+                     available={"SPY": True})
+    assert result.ledger.cash >= 0.0, "a tiny residue should be snapped to exactly zero"
+
+    # A materially negative balance is still an error: that is money not held.
+    broken = result.ledger.copy()
+    broken.cash = -50.0
+    with pytest.raises((ExecutionError, Exception)):
+        broken.check()

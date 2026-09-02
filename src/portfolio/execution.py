@@ -195,8 +195,27 @@ def execute(
         legs.append(TradeLeg(ticker, delta, price))
 
     # 6. Post-conditions.
-    if ledger.cash < -EPS:
-        raise ExecutionError(f"execution left negative cash: {ledger.cash!r}")
+    #
+    # The cash guard is RELATIVE to portfolio size, and that is a correction. An absolute
+    # 1e-9 tolerance against a NAV of ~1e6 is a relative tolerance of 1e-15 -- at the
+    # limit of double precision -- so summing two dozen notionals can breach it on
+    # rounding alone, with nothing actually wrong. That is not hypothetical: a walk-forward
+    # fold died on `cash = -1.004e-09`, a millionth of a cent against a million dollars.
+    #
+    # A residue inside the tolerance is snapped to exactly zero, which keeps invariant I1
+    # (`cash >= 0`) literally true rather than true-within-epsilon. A materially negative
+    # balance is still an error, because that would mean the executor spent money it did
+    # not have.
+    gross = abs(ledger.cash) + sum(
+        abs(n) * float(open_prices[t]) for t, n in ledger.shares.items()
+        if t in open_prices)
+    cash_tolerance = max(EPS, 1e-11 * gross)
+    if ledger.cash < -cash_tolerance:
+        raise ExecutionError(
+            f"execution left negative cash: {ledger.cash!r} "
+            f"(tolerance {cash_tolerance:.3e} on a gross book of {gross:.2f})")
+    if ledger.cash < 0.0:
+        ledger.cash = 0.0
     ledger.check()
     ledger.as_of = session
 
