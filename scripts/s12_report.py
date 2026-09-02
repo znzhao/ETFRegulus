@@ -127,6 +127,9 @@ def _add_args(p: argparse.ArgumentParser) -> None:
                         "the `rl_policy` column; 'latest' picks the newest")
     p.add_argument("--no-acceptance", action="store_true",
                    help="skip the acceptance table (it needs Stages 8-11)")
+    p.add_argument("--no-unconstrained", action="store_true",
+                   help="omit the plain market benchmarks and report only the "
+                        "constraint-layer versions")
     p.add_argument("--policy-cell", default=None,
                    help="which Stage 8 (N, D_max) cell the rl_policy column comes from, "
                         "e.g. N30_D0.05. Defaults to the fold's headline trajectory. The "
@@ -153,23 +156,48 @@ def run_year(market, weight_fn, sim_cfg, projector, envelope, year: int):
 
 
 def collect(resolved: dict, ctx: StageContext, strategies: list[str],
-            years: list[int], hold_days, max_drawdown) -> list[YearResult]:
+            years: list[int], hold_days, max_drawdown, *,
+            constrained: bool = True, suffix: str = "") -> list[YearResult]:
+    """Run each strategy year by year.
+
+    `constrained=False` produces the **market benchmark**: the rule as an ordinary
+    investor would run it, with no holding lock, no drawdown ceiling and no risk
+    envelope. That version is what a name like `spy_buy_hold` actually promises, and
+    without it the report has no market reference at all -- only rules that the
+    constraint layer has already reshaped. Measured on the constrained runs, SPY
+    buy-and-hold requests 100% SPY on every single step and is cut to a 14.5% average
+    holding in 2020, which is the safety layer working exactly as specified and is also
+    not a buy-and-hold benchmark by any reading of the words.
+    """
     market, ucfg = load_market(resolved)
     constraints = build_constraints(resolved)
     projector = make_projector_from(constraints)
-    envelope = build_envelope(constraints)
-    sim_cfg = build_sim_config(resolved, constraints, hold_days=hold_days,
-                               max_drawdown=max_drawdown, seed=ctx.seed)
+    envelope = build_envelope(constraints) if constrained else None
+    sim_cfg = build_sim_config(
+        resolved, constraints,
+        hold_days=hold_days if constrained else 0,
+        # A ceiling of 1.0 can never be breached, so capital preservation never engages.
+        max_drawdown=max_drawdown if constrained else 1.0, seed=ctx.seed)
+    if not constrained:
+        sim_cfg.risk_enabled = False
     category_of = ticker_to_category(ucfg)
     params = (resolved.get("baselines", {}) or {}).get("params", {})
 
     ctx.log(f"cell: N={sim_cfg.hold_days}  D_max={sim_cfg.max_drawdown}  "
-            f"cost_bps={sim_cfg.cost_bps}  risk={sim_cfg.risk_enabled}")
+            f"cost_bps={sim_cfg.cost_bps}  risk={sim_cfg.risk_enabled}"
+            f"{'' if constrained else '   [MARKET BENCHMARK -- no lock, no ceiling]'}")
 
     results: list[YearResult] = []
     for name in strategies:
-        weight_fn = weight_source(name, market, params.get(name))
         for year in years:
+            # REBUILT PER YEAR, and that is load-bearing. These strategies carry state --
+            # `spy_tlt_60_40` holds a `held` flag, `equal_weight` remembers the universe
+            # size -- and every report year is an independent window with fresh capital.
+            # Sharing one weight function across years leaks the previous year's state in:
+            # only the first year saw its initial deployment, and every later year opened
+            # 100% in cash waiting for a month-end rebalance, roughly 20 sessions of
+            # unintended cash drag that silently understated every rebalancing baseline.
+            weight_fn = weight_source(name, market, params.get(name))
             out = run_year(market, weight_fn, sim_cfg, projector, envelope, year)
             if out is None:
                 ctx.warn(f"{name} {year}: too few sessions, skipped")
@@ -181,12 +209,12 @@ def collect(resolved: dict, ctx: StageContext, strategies: list[str],
                     "invalid one (evaluation.md section 3)."
                 )
             results.append(YearResult(
-                strategy=name, year=year, trajectory=out.trajectory,
+                strategy=name + suffix, year=year, trajectory=out.trajectory,
                 metrics=annual_metrics(out.trajectory),
                 allocation=category_allocation(out.trajectory, category_of),
             ))
-        done = [r for r in results if r.strategy == name]
-        ctx.log(f"  {name:<20} {len(done)} years, "
+        done = [r for r in results if r.strategy == name + suffix]
+        ctx.log(f"  {name + suffix:<28} {len(done)} years, "
                 f"mean return {np.mean([r.metrics['total_return'] for r in done]):+.2%}")
     return results
 
@@ -389,7 +417,20 @@ def main(resolved: dict, ctx: StageContext) -> None:
 
     ctx.log(f"{len(strategies)} strategies x {len(years)} years "
             f"({years[0]}-{years[-1]}) = {len(strategies) * len(years)} runs")
-    results = collect(resolved, ctx, strategies, years, hold_days, max_drawdown)
+    # The market benchmarks first: they are what a reader compares against, and what
+    # the plain names promise. The constrained versions carry an explicit suffix.
+    results: list[YearResult] = []
+    reported = []
+    if not args.no_unconstrained:
+        results += collect(resolved, ctx, strategies, years, hold_days, max_drawdown,
+                           constrained=False)
+        reported += list(strategies)
+    results += collect(resolved, ctx, strategies, years, hold_days, max_drawdown,
+                       constrained=True,
+                       suffix="_constrained" if not args.no_unconstrained else "")
+    reported += [s + ("_constrained" if not args.no_unconstrained else "")
+                 for s in strategies]
+    strategies = reported
     if not results:
         raise StageError("no results")
 

@@ -219,7 +219,12 @@ def build_momentum(market: MarketData, params: dict):
 
     def weights(session, ctx: StepContext) -> np.ndarray:
         i = ctx.step
-        if session not in month_ends:
+        # As in `build_classical_optimizer`: deploy at the first opportunity rather than
+        # waiting for a month-end, so a fresh mandate is not parked in cash for weeks.
+        # Going to cash later because the absolute filter rejected everything is a
+        # DIFFERENT thing and remains intact -- that is the strategy's risk profile.
+        due = (session in month_ends) or not state["held"]
+        if not due:
             return _hold(ctx) if state["held"] else state["target"]
         if i < lookback + skip:
             return _hold(ctx) if state["held"] else state["target"]
@@ -268,7 +273,12 @@ def build_classical_optimizer(market: MarketData, params: dict):
 
     def weights(session, ctx: StepContext) -> np.ndarray:
         i = ctx.step
-        if session not in month_ends:
+        # Deploy at the FIRST opportunity, not at the first month-end. Waiting for the
+        # schedule leaves a new mandate sitting in cash for up to three weeks, which no
+        # implementation would actually do -- and in a per-year evaluation that is ~8% of
+        # every year spent uninvested, understating the baseline it is meant to represent.
+        due = (session in month_ends) or not state["held"]
+        if not due:
             return _hold(ctx) if state["held"] else state["target"]
         lo = max(0, i - window)
         if i - lo < 60:
