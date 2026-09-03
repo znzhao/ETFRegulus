@@ -130,6 +130,10 @@ def _add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-unconstrained", action="store_true",
                    help="omit the plain market benchmarks and report only the "
                         "constraint-layer versions")
+    p.add_argument("--no-constrained", action="store_true",
+                   help="omit the constraint-layer baseline variants and report only "
+                        "the plain market benchmarks (spy_buy_hold, spy_tlt_60_40, "
+                        "etc. as an ordinary investor would run them)")
     p.add_argument("--policy-cell", default=None,
                    help="which Stage 8 (N, D_max) cell the rl_policy column comes from, "
                         "e.g. N30_D0.05. Defaults to the fold's headline trajectory. The "
@@ -421,18 +425,28 @@ def main(resolved: dict, ctx: StageContext) -> None:
     ctx.log(f"{len(strategies)} strategies x {len(years)} years "
             f"({years[0]}-{years[-1]}) = {len(strategies) * len(years)} runs")
     # The market benchmarks first: they are what a reader compares against, and what
-    # the plain names promise. The constrained versions carry an explicit suffix.
+    # the plain names promise. The constrained versions -- the same rule run through the
+    # agent's lock, ceiling and risk envelope -- carry an explicit suffix, and are OFF by
+    # default: they exist to show what the constraint layer does to a naive rule, not as
+    # baselines the policy is meant to be judged against. A policy is compared to what an
+    # ordinary investor would actually run, which is the unconstrained version.
+    show_unconstrained = not args.no_unconstrained
+    show_constrained = not args.no_constrained
+    if not show_unconstrained and not show_constrained:
+        raise StageError("--no-unconstrained and --no-constrained together leave no "
+                         "baselines to report")
+
     results: list[YearResult] = []
     reported = []
-    if not args.no_unconstrained:
+    if show_unconstrained:
         results += collect(resolved, ctx, strategies, years, hold_days, max_drawdown,
                            constrained=False)
         reported += list(strategies)
-    results += collect(resolved, ctx, strategies, years, hold_days, max_drawdown,
-                       constrained=True,
-                       suffix="_constrained" if not args.no_unconstrained else "")
-    reported += [s + ("_constrained" if not args.no_unconstrained else "")
-                 for s in strategies]
+    if show_constrained:
+        suffix = "_constrained" if show_unconstrained else ""
+        results += collect(resolved, ctx, strategies, years, hold_days, max_drawdown,
+                           constrained=True, suffix=suffix)
+        reported += [s + suffix for s in strategies]
     strategies = reported
     if not results:
         raise StageError("no results")
