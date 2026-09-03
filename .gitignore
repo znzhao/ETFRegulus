@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- ETFRegulus (D6: parquet under data/ is the source of truth) -----------
+# ANCHORED to the repo root. An unanchored `data/` matches any directory of that name
+# at any depth, which silently excluded `src/data/` and `tests/data/` -- the entire data
+# layer and its tests -- from version control.
+/data/
+/artifacts/
