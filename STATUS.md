@@ -11,19 +11,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Phase 3 complete.** Stages 9–12 green; the acceptance table has **zero blocking failures**. Next: the full-budget training run |
-| **Run this** | `python -m scripts.s06_smoke_env --config config/training.yaml --episodes 500` *(not yet written)* |
-| **Next gate** | Stage 8 (walk-forward) gates Phase 3 |
-| **Lock period** | `N = 30` calendar days (D16); operating range `[15, 21, 30, 42, 60]` in `config/constraints.yaml` |
+| **Current stage** | **Phases 0–3 all complete.** Stages 0–12 green; hard acceptance passed at every stage. Grids refined twice more by request (finest: `N` 9 rungs, `D_max` 1–15% at 7 rungs) and retrained cleanly each time. Next: the full-budget training run — every result to date is at ~2% of `training.total_timesteps`. |
+| **Run this** | `python -m scripts.s08_walk_forward --config config/evaluation.yaml` (walk-forward), then `s09_stress` / `s10_bootstrap` / `s11_adversarial` / `s12_report` |
+| **Next gate** | None open — Phase 3 passed. The full-budget retrain is the next real milestone, not a gate. |
+| **Lock period** | `N = 30` calendar days (D16); operating range `[15, 18, 21, 25, 30, 36, 42, 50, 60]` (2^(1/4) ladder) in `config/constraints.yaml` |
+| **Drawdown ceiling** | `D_max = 0.05` primary; operating range `[0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15]` — revised from the original `[0.05..0.25]` down to `[0.001..0.10]` and finally to this range, each time by explicit request, each time retrained |
 | **Risk envelope** | **Calibrated** (Q1 closed): `quantile 0.05, horizon 5, aggregation max, measure cvar` |
-| **Test suite** | 217 passed, 1 deselected (`network`), 52s — `.venv/Scripts/python.exe -m pytest -q` |
-| **Last updated** | 2026-09-01 |
+| **Latest walk-forward run** | `s08_walk_forward_20260903T124443Z_a207776c` — 13/13 folds, hard acceptance PASSED, on the current grids |
+| **Latest acceptance (Stage 12, unconstrained baselines only)** | `D_max=1%` 17/22 · **`D_max=5%` 22/22** · `D_max=10%` 20/22 · `D_max=15%` 20/22 |
+| **Test suite** | 373 passed, 3 deselected (`network`, `slow`), ~60s — `.venv/Scripts/python.exe -m pytest -q` |
+| **Last updated** | 2026-09-03 |
 
 ---
 
 ## Finished
 
-**Phases 0 and 1 are complete, and Stage 6 is green.** Stages 0–6 are `[x]`: every gating test
+**Phases 0 through 3 are all complete.** Stages 0–12 are `[x]`: every gating test
 named for them in [reference/testing.md](reference/testing.md) §3 passes, and each stage runs end
 to end from a clean checkout.
 
@@ -41,8 +44,7 @@ to end from a clean checkout.
 | **Phase 3** | 9 — Stress | `s09_stress` | `D_max` monotonicity | `[x]` monotone at every `N`; 29 cells |
 | | 10 — Bootstrap | `s10_bootstrap` | bands + block-length sensitivity | `[x]` 1,000 replicates, sensitivity stable |
 | | 11 — Adversarial | `s11_adversarial` | 4 scenarios, disclaimer present | `[x]` zero violations on all 4 |
-| | 12 — Report | `s12_report` | acceptance table, explicit pass/fail | `[x]` 18/22, **0 blocking failures** |
-| **Phase 3** | 12 — Report *(comparison half)* | `s12_report` | allocations sum to 100, zero violations | `[~]` baseline reference report built; acceptance table awaits Stages 8–11 |
+| | 12 — Report | `s12_report` | acceptance table, explicit pass/fail | `[x]` **22/22 at `D_max=5%`**, 0 blocking failures at every ceiling tried |
 
 **Invariants and tests proven** — the full list from [reference/testing.md](reference/testing.md):
 
@@ -508,15 +510,28 @@ and diversification rows show it **losing to both baselines** on the paths desig
 - [ ] Refuses dirty-git runs unless `--allow-dirty` *(not implemented; the manifest records
       `git_dirty` but the stage does not yet refuse on it)*
 
-**Acceptance: 18/22 criteria pass, ZERO blocking failures.** All four failures are non-blocking
-performance criteria — the policy's Sharpe of 0.55 loses to `spy_buy_hold` (0.97), `spy_tlt_60_40` (0.90),
-`equal_weight` (0.77) and `momentum` (0.64); it beats `cash` and `classical_optimizer`.
+**Superseded by later iteration in this same session** (grids revised twice more, Sortino added
+then Sharpe restored as the primary judge, constrained baseline variants dropped from the default
+report). The figures below are the FIRST acceptance run and are kept for the record; the current
+numbers are in the **Current position** table at the top of this file.
+
+Original run: acceptance 18/22 criteria pass, ZERO blocking failures, on the `D_max` 5-25% grid.
+All four failures were non-blocking performance criteria — the policy's Sharpe of 0.55 lost to
+`spy_buy_hold` (0.97), `spy_tlt_60_40` (0.90), `equal_weight` (0.77) and `momentum` (0.64); it beat
+`cash` and `classical_optimizer`.
+
+**Current best result** (`D_max` 1-15% grid, `s12_report --no-constrained`, market benchmarks
+only): at the primary cell `D_max = 5%`, acceptance is **22/22** — the policy's Sharpe of 0.95
+leads all six baselines (`spy_tlt_60_40` 0.90, `spy_buy_hold` 0.89, `equal_weight` 0.79,
+`classical_optimizer` 0.72, `momentum` 0.70, `cash` 0.00). At `D_max` 1%, 10% and 15% it is 17/22,
+20/22 and 20/22 — it does not lead at every ceiling, only at the one it is deployed at.
 
 > **What Phase 3 establishes, stated precisely.** Every hard engineering criterion is zero across
-> walk-forward, the stress grid and the adversarial paths. The constraint machinery is correct and its
-> limits are measured. It establishes **nothing** about whether the policy is good: it was trained at
-> ~2% of the configured budget, and at that budget it does not clear the bar rl-training.md §7 sets —
-> beating a two-line static allocation.
+> walk-forward, the stress grid and the adversarial paths, on every grid tried. The constraint
+> machinery is correct and its limits are measured. Performance is a genuinely different claim: the
+> policy was trained at ~2% of the configured budget, the 5% result is a single seed, and the
+> ranking has moved with grid choice and reporting convention within this same session. It is
+> promising, not settled — the full-budget run is what would settle it.
 
 ---
 
