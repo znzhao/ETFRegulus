@@ -115,15 +115,15 @@ def _alloc_bars(summary: pd.DataFrame) -> str:
 def _stat_cards(summary: pd.DataFrame) -> str:
     """The headline read, before any table: who returned most, and at what risk."""
     best_ret = summary["Annual return %"].idxmax()
-    best_sharpe = summary["Sortino"].idxmax()
+    best_sharpe = summary["Sharpe"].idxmax()
     risky = summary.drop(index=[i for i in summary.index if summary.loc[i, "Return std %"] <= 1e-9],
                          errors="ignore")
     safest = risky["Max drawdown %"].idxmin() if len(risky) else summary.index[0]
     cards = [
         ("Highest return", best_ret, f"{summary.loc[best_ret, 'Annual return %']:.2f}%",
          "annualized, chained across independent years"),
-        ("Best risk-adjusted", best_sharpe, f"{summary.loc[best_sharpe, 'Sortino']:.2f}",
-         "Sortino, rf = 0"),
+        ("Best risk-adjusted", best_sharpe, f"{summary.loc[best_sharpe, 'Sharpe']:.2f}",
+         "Sharpe, rf = 0"),
         ("Shallowest drawdown", safest, f"{summary.loc[safest, 'Max drawdown %']:.2f}%",
          "worst single year, excluding all-cash"),
     ]
@@ -314,13 +314,11 @@ def render_page(summary: pd.DataFrame, tables: dict, meta: dict,
          None),
         ("volatility", "Return standard deviation", "% annualized",
          tables["volatility"], 2, False, False, None),
+        ("sharpe", "Sharpe ratio", "rf = 0", tables["sharpe"], 2, True, False,
+         "The headline risk-adjusted measure."),
         ("sortino", "Sortino ratio", "rf = 0, downside deviation",
          tables["sortino"], 2, True, False,
-         "The headline risk-adjusted measure. Sharpe penalises upside deviation as hard "
-         "as downside; for a system built around a drawdown constraint, what matters is "
-         "the dispersion of losses."),
-        ("sharpe", "Sharpe ratio", "rf = 0", tables["sharpe"], 2, True, False,
-         "Kept for reference, not for judging."),
+         "Kept for reference: it does not penalise upside deviation the way Sharpe does."),
         ("max-drawdown", "Maximum drawdown", "% within year", tables["max_drawdown"],
          2, False, True, "The peak resets on the first session of each year."),
     ]
@@ -366,14 +364,6 @@ def render_page(summary: pd.DataFrame, tables: dict, meta: dict,
         "fifteen years — every annual cell from 2009 on would read exactly 0.00%. "
         "Independent years also match how walk-forward evaluates the policy, one trained "
         "model per test year, which is what makes the RL column comparable to these.</dd>")
-    add("<dt>Sortino is the headline measure, not Sharpe.</dt><dd>Sharpe divides by "
-        "total volatility, which penalises upside deviation exactly as hard as downside "
-        "&mdash; a strategy is marked down for having good months. For a system whose "
-        "entire purpose is a <em>drawdown</em> constraint, what matters is the dispersion "
-        "of losses. The denominator is the standard downside deviation, "
-        "<code>sqrt(mean(min(r, 0)^2))</code> annualised over <em>every</em> observation "
-        "rather than only the losing ones &mdash; averaging over just the losers flatters "
-        "a strategy that loses rarely. Sharpe is still reported, for reference.</dd>")
     add("<dt>The risk-free rate is zero, so Sharpe is return ÷ volatility.</dt><dd>CASH "
         "in this universe returns exactly 0.00% per day and is the agent's outside "
         "option, so excess return over the risk-free asset <em>is</em> the raw return. "

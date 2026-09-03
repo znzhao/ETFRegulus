@@ -343,9 +343,10 @@ def render_markdown(summary: pd.DataFrame, tables: dict, meta: dict,
     for key, title, decimals, note in (
         ("annual_return", "Annual return (%)", 2, None),
         ("volatility", "Return standard deviation (%, annualized)", 2, None),
+        ("sharpe", "Sharpe ratio (rf = 0)", 2,
+         "The headline risk-adjusted measure."),
         ("sortino", "Sortino ratio (rf = 0, downside deviation)", 2,
-         "The headline risk-adjusted measure; Sharpe below is for reference."),
-        ("sharpe", "Sharpe ratio (rf = 0)", 2, None),
+         "For reference: does not penalise upside deviation the way Sharpe does."),
         ("max_drawdown", "Maximum drawdown (%, within year)", 2,
          "Peak resets on the first session of each year."),
     ):
@@ -469,10 +470,7 @@ def main(resolved: dict, ctx: StageContext) -> None:
             for name in summary.index:
                 if name == "rl_policy":
                     continue
-                # SORTINO, not Sharpe. Sharpe penalises upside deviation as hard as
-                # downside, which is the wrong instrument for a system built around a
-                # drawdown constraint.
-                better = float(rl["Sortino"]) > float(summary.loc[name, "Sortino"])
+                better = float(rl["Sharpe"]) > float(summary.loc[name, "Sharpe"])
                 note = ("POINT ESTIMATE ONLY, and on 13 years it carries no "
                         "significance: read the Stage 10 bootstrap bands before "
                         "treating a pass here as a result.")
@@ -481,9 +479,9 @@ def main(resolved: dict, ctx: StageContext) -> None:
                             "anyone could implement. " + note)
                 comparison["beats"][name] = {
                     "passed": better,
-                    "observed": (f"Sortino {rl['Sortino']:.2f} vs "
-                                 f"{summary.loc[name, 'Sortino']:.2f}"),
-                    "requirement": "higher Sortino than the baseline",
+                    "observed": (f"Sharpe {rl['Sharpe']:.2f} vs "
+                                 f"{summary.loc[name, 'Sharpe']:.2f}"),
+                    "requirement": "higher Sharpe than the baseline",
                     "note": note,
                 }
         acceptance = build_acceptance(wf, st, bs, adv, comparison)
