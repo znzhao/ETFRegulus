@@ -54,7 +54,8 @@ from src.training.trainer import train_stage
 
 #: The default evaluation grid: 3x3 out of the full 5x5 (D5 compute sizing).
 DEFAULT_GRID_N = (15, 30, 60)
-DEFAULT_GRID_D = (0.01, 0.05, 0.10)
+# Four ceilings, so the reports at 1/5/10/15% all read a cached cell.
+DEFAULT_GRID_D = (0.01, 0.05, 0.10, 0.15)
 
 
 def _add_args(p: argparse.ArgumentParser) -> None:

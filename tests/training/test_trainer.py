@@ -80,9 +80,9 @@ def test_the_normalizer_is_saved_next_to_the_policy(tmp_path: Path):
 
 
 class _FakeBundle:
-    env_cfg = EnvConfig(hold_days_values=(15, 21, 30, 42, 60),
-                        hold_days_weights=(0.15, 0.20, 0.30, 0.20, 0.15),
-                        max_drawdown_values=(0.01, 0.02, 0.03, 0.05, 0.10),
+    env_cfg = EnvConfig(hold_days_values=(15, 18, 21, 25, 30, 36, 42, 50, 60),
+                        hold_days_weights=(0.06, 0.08, 0.11, 0.13, 0.24, 0.13, 0.11, 0.08, 0.06),
+                        max_drawdown_values=(0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15),
                         episode_lengths=(63, 126, 252, 504), strict=True)
 
 

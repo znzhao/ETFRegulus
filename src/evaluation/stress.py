@@ -33,17 +33,17 @@ import numpy as np
 import pandas as pd
 
 #: D16's operating range plus the out-of-distribution stress points (robustness.md 1.2).
-N_SWEEP: tuple[int, ...] = (0, 7, 15, 21, 30, 42, 60, 90, 180)
+N_SWEEP: tuple[int, ...] = (0, 7, 15, 18, 21, 25, 30, 36, 42, 50, 60, 90, 180)
 
 #: Deliberately outside the training range. Every cell at one of these is reported as OOD.
 N_OUT_OF_DISTRIBUTION: frozenset[int] = frozenset({0, 7, 90, 180})
 
-D_SWEEP: tuple[float, ...] = (0.01, 0.02, 0.03, 0.05, 0.10)
+D_SWEEP: tuple[float, ...] = (0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15)
 
 #: The default combined grid (D5): the operating range, so it measures the system where it
 #: is meant to run.
 GRID_N_DEFAULT: tuple[int, ...] = (15, 30, 60)
-GRID_D_DEFAULT: tuple[float, ...] = (0.01, 0.05, 0.10)
+GRID_D_DEFAULT: tuple[float, ...] = (0.01, 0.05, 0.15)
 
 #: How much a single seed may violate monotonicity before it is called a bug.
 MONOTONICITY_TOLERANCE = 0.02

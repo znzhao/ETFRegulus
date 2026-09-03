@@ -102,13 +102,14 @@ Canonical definition in [../config/constraints.yaml](../config/constraints.yaml)
 lock:
   hold_days:
     primary: 30                              # the deployment value
-    values:  [15, 21, 30, 42, 60]            # the operating range: a sqrt(2) ladder,
-    weights: [0.15, 0.20, 0.30, 0.20, 0.15]  #   geometrically centred on 30
+    values:  [15, 18, 21, 25, 30, 36, 42, 50, 60]   # the operating range: a
+    weights: [0.06, 0.08, 0.11, 0.13, 0.24,      #   2^(1/4) ladder, geometrically
+              0.13, 0.11, 0.08, 0.06]            #   centred on 30
     stress_values: [0, 7, 90, 180]           # Stage 9 only, reported as OOD
 drawdown:
   max_drawdown:
-    primary: 0.15
-    values:  [0.05, 0.10, 0.15, 0.20, 0.25]
+    primary: 0.05
+    values:  [0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15]
     weights: null                            # uniform
 ```
 

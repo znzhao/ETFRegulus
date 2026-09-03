@@ -242,7 +242,7 @@ Canonical definition in [../config/constraints.yaml](../config/constraints.yaml)
 | | Values | Used by |
 |---|---|---|
 | **Primary** | `30` | Deployment; every report leads with this |
-| **Operating range** | `[15, 21, 30, 42, 60]`, weights `[.15, .20, .30, .20, .15]` | Training and evaluation |
+| **Operating range** | `[15, 18, 21, 25, 30, 36, 42, 50, 60]`, weights `[.06, .08, .11, .13, .24, .13, .11, .08, .06]` | Training and evaluation |
 | **Out-of-distribution** | `[0, 7, 90, 180]` | Stage 9 sensitivity sweep only |
 
 **Why a sqrt(2) ladder rather than evenly spaced values.** A holding period is a

@@ -18,19 +18,25 @@ lock:
     # The operating range the policy is trained and evaluated over: centred on 30 and
     # varying around it, from a fortnight to two months.
     #
-    # It is a sqrt(2) ladder rather than an evenly spaced one, because a holding period
-    # is a multiplicative quantity: going 30 -> 60 days is the same size of change as
-    # going 30 -> 15, while 30 -> 45 and 30 -> 15 are not. So the grid is centred on 30
-    # GEOMETRICALLY -- weighted geometric mean 29.9 -- and every step is a factor of
-    # ~1.41. An evenly spaced grid over the same endpoints would sit at an effective
-    # centre above 30 while still looking symmetric.
-    values:  [15, 21, 30, 42, 60]
+    # A geometric ladder rather than an evenly spaced one, because a holding period is a
+    # multiplicative quantity: going 30 -> 60 days is the same size of change as going
+    # 30 -> 15, while 30 -> 45 and 30 -> 15 are not. The grid is centred on 30
+    # GEOMETRICALLY -- weighted geometric mean 29.9 -- and an evenly spaced grid over the
+    # same endpoints would sit at an effective centre above 30 while still looking
+    # symmetric.
+    #
+    # REFINED 2026-09-03 from five rungs to nine: the step factor drops from sqrt(2)
+    # (~1.41) to 2^(1/4) (~1.19), same endpoints. The coarse ladder left large gaps the
+    # policy had to interpolate across -- 30 to 42 is a 40% jump in the constraint it is
+    # conditioning on -- and the Stage 9 sweep could not distinguish a genuine trend in N
+    # from noise between two distant rungs.
+    values:  [15, 18, 21, 25, 30, 36, 42, 50, 60]
 
     # Sampled per episode, peaked on the primary value. Uniform if omitted. The point of
     # the weighting is that the policy spends most of its capacity where the constraint
     # will really sit, while still seeing enough of the tails to condition on N rather
     # than memorize one lock length.
-    weights: [0.15, 0.20, 0.30, 0.20, 0.15]
+    weights: [0.06, 0.08, 0.11, 0.13, 0.24, 0.13, 0.11, 0.08, 0.06]
 
     # Deliberately OUTSIDE the operating range. Used only by the Stage 9 sensitivity
     # sweep, to characterize how the policy degrades beyond what it was trained for.
@@ -44,7 +50,12 @@ lock:
 drawdown:
   # The maximum-drawdown ceiling. An ACTION-level safety constraint, never a guarantee
   # about the realized path, and never a reward penalty (D11, risk-envelope.md section 1).
-  # REVISED 2026-09-02 (twice). The range is 1% to 10%.
+  # REVISED again 2026-09-03: the range is 1% to 15%, at seven rungs rather than five.
+  # The top was raised from 10% because 10% still bound in most years and left no cell
+  # where the ceiling is merely a backstop; 15% is where the previous grid's second rung
+  # sat, and it is a plausible mandate rather than the 25% that never bound at all.
+  #
+  # Earlier history of this grid, kept because both directions were informative:
   #
   # First revision cut the old 5%-25% grid, whose top end was a ceiling so loose it almost
   # never bound -- a "constraint" that does not constrain teaches the policy nothing about
@@ -59,7 +70,7 @@ drawdown:
   # contains 1%, 5% and 10% exactly, which are the cells the reports lead with.
   max_drawdown:
     primary: 0.05
-    values:  [0.01, 0.02, 0.03, 0.05, 0.10]
+    values:  [0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15]
     # Uniform: unlike N, there is no single expected deployment value here -- the whole
     # point of conditioning on D_max is to serve a caller who picks their own ceiling.
     #
