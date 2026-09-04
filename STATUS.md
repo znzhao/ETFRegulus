@@ -17,10 +17,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 18, 21, 25, 30, 36, 42, 50, 60]` (2^(1/4) ladder) in `config/constraints.yaml` |
 | **Drawdown ceiling** | `D_max = 0.05` primary; operating range `[0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15]` — revised from the original `[0.05..0.25]` down to `[0.001..0.10]` and finally to this range, each time by explicit request, each time retrained |
 | **Risk envelope** | **Calibrated** (Q1 closed): `quantile 0.05, horizon 5, aggregation max, measure cvar` |
-| **Latest walk-forward run** | `s08_walk_forward_20260903T124443Z_a207776c` — 13/13 folds, hard acceptance PASSED, on the current grids |
-| **Latest acceptance (Stage 12, unconstrained baselines only)** | `D_max=1%` 17/22 · **`D_max=5%` 22/22** · `D_max=10%` 20/22 · `D_max=15%` 20/22 |
+| **Latest walk-forward run** | `s08_walk_forward_20260903T224114Z_a207776c` — **14/14 folds (2012–2025)**, hard acceptance PASSED, on the current grids |
+| **Latest acceptance (Stage 12, unconstrained baselines only, N=30 / D_max=5%, 2012–2025)** | **22/22** — `rl_policy` Sharpe 0.92 leads all six baselines (`spy_tlt_60_40` 0.90, `spy_buy_hold` 0.89, `equal_weight` 0.83, `classical_optimizer` 0.78, `momentum` 0.74, `cash` 0.00). Bootstrap Sharpe band 0.47–1.41 (median 0.95), fully above zero. |
 | **Test suite** | 373 passed, 3 deselected (`network`, `slow`), ~60s — `.venv/Scripts/python.exe -m pytest -q` |
-| **Last updated** | 2026-09-03 |
+| **Last updated** | 2026-09-04 |
 
 ---
 
@@ -629,3 +629,5 @@ until it is built.
 | 2026-09-01 | **A drawdown ceiling against a never-resetting peak is far harsher than the same ceiling per fold.** Stage 8 and Stage 12 must state which convention a result used; the two are not comparable. |
 | 2026-09-03 | **Grids refined again, by request: N to nine rungs (2^(1/4) ladder, 15-60), D_max to seven rungs spanning 1%-15%.** Retrained cleanly across all 13 folds; hard acceptance passed. Stage 9 monotonicity still holds. |
 | 2026-09-03 | **At the 5% ceiling the policy now beats three of four constrained baselines on Sortino** (1.33 vs spy_tlt_60_40* 1.23, spy_buy_hold* 0.95, equal_weight* 1.13), losing only to momentum_constrained (1.62). Bootstrap band 0.66-2.08 (median 1.33) corroborates it. Acceptance 27/28 at 5%, its best result yet. At 1%, 10% and 15% the policy still trails most baselines (18/28, 23/28, 23/28). |
+| 2026-09-04 | **2025 added to the backtest.** `folds.json` already carried `fold_2025` from Stage 3 (250 sessions, its own scaler); only `--last-year` needed to move. Retrained cleanly, 14/14 folds, hard acceptance passed; Stage 9 monotonicity and Stage 11 zero-violations both still hold. 2025 alone: `high_entropy_slow` selected, +7.37% return, 16.51% max DD, zero preventable violations. |
+| 2026-09-04 | **At N=30, D_max=5%, 2012-2025, market benchmarks only: acceptance is 22/22.** `rl_policy` Sharpe 0.92 leads all six baselines, including spy_tlt_60_40 (0.90) and spy_buy_hold (0.89) for the first time on a like-for-like unconstrained comparison. Bootstrap Sharpe band 0.47-1.41 (median 0.95) sits entirely above zero. Still a single seed at ~2% of the configured training budget. |
