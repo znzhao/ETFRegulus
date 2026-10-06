@@ -1,0 +1,19 @@
+# Stage 7 curriculum 5 of 5 -- everything randomized.
+#
+# Inherits every hyperparameter, the observation selection and the hard constraints
+# from the base configs. Only what this rung CHANGES is written below, so a diff
+# between two stage files is exactly the difficulty being added.
+extends:
+  - ../training.yaml
+
+# Curriculum stage 5 -- RANDOMIZED.
+#
+# Reservoir initial states (reachable by construction) and sampled episode lengths.
+# This is the rung whose policy goes forward to Stage 8, because it is the only one
+# trained on the state distribution deployment actually presents: a portfolio that was
+# already running, mid-drawdown, with locks already ticking.
+environment:
+  episode_lengths: [63, 126, 252, 504]
+  risk_enabled: true
+  flat_start: false
+  stress_reset: false

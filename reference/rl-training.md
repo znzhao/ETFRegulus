@@ -43,14 +43,49 @@ Why the shared per-asset encoder: it makes the policy roughly permutation-equiva
 it learns about one sector ETF transfers to the others, and adding a ticker later does not require relearning
 from scratch. It also cuts parameter count substantially versus a flat MLP over the full observation.
 
+**The actor head is per-asset too — a second correction.** The sketch above ends in a flat
+`Linear(trunk -> K+1)`, which has a separate weight vector per asset and therefore throws away the
+equivariance the encoder just bought: under a flat head, "adding a ticker later does not require relearning
+from scratch" is simply false. The implementation instead computes `logit_i = head([e_i, context])` with
+`head` shared across assets, plus a small separate head for CASH (which has no per-asset block, being the
+synthetic outside option). The model is then equivariant end to end, and its per-asset parameter count does
+not grow with the universe — both properties are asserted in `tests/training/test_policy.py` rather than
+claimed. The critic keeps an ordinary `2 x 256` trunk, because a value function is one scalar about the whole
+portfolio and has nothing to gain from equivariance.
+
+**Availability masking uses a large negative, not `-inf`.** The action space is a bounded `[-1, 1]`
+(env-mdp.md §8), so `-inf` is unavailable and would produce NaN in the Gaussian log-prob besides. Unavailable
+assets get an action mean of **-5**, which after the environment's `LOGIT_SCALE` is worth `e^-50` of relative
+weight — indistinguishable from zero, and differentiable.
+
 **Availability masking in the logits.** Unavailable assets get `-inf` before the softmax, so probability mass
 is never spent on ETFs that do not exist yet. This measurably reduces projection distance in the early years
 when a third of the universe has not launched.
 
-Normalization: `VecNormalize` on observations, with statistics **frozen at evaluation** and **fitted only on
-training-window data**. A `VecNormalize` whose running statistics keep updating during evaluation is a
-full-sample-scaling leak wearing a disguise, and that is explicitly prohibited. Statistics are saved alongside
-the policy and restored together — a policy loaded without its normalizer is meaningless.
+**Normalization: rewards only. Observations are NOT re-normalized, and this is a correction.**
+
+This section previously specified `VecNormalize` on observations. Measured on the real environment, that is
+wrong here for two reasons:
+
+1. **It is redundant.** The observation is already scaled by the fold scaler that Stage 3 fitted on that
+   fold's training window alone — the normalization this project already guarantees is leak-free, and the one
+   T10 tests. Over 40 episodes the assembled observation has mean **0.20** and standard deviation **0.83**,
+   which is what `VecNormalize` exists to produce.
+2. **It would destroy the feasibility masks.** 70 of the 656 observation dimensions are constant over a
+   training window, and **19 of those are `pf_available` bits**. `VecNormalize` maps a constant dimension to
+   exactly 0, so the availability mask — which the policy reads directly to mask its own logits, and which the
+   agent needs in order to know which actions the projection will alter — would arrive as a column of zeros.
+   That is precisely the silent failure §3 mitigation 2 names as the most likely cause of a flat
+   `proj_distance`, and stacking a second normalizer is how you get it.
+
+Rewards **are** normalized (`VecNormalize(norm_obs=False, norm_reward=True)`), because daily log returns are
+~1e-3 and PPO's value loss on an unscaled target of that magnitude is numerically hopeless. The consequence:
+training reward curves are in normalized units, so evaluation numbers must always come from the trajectory
+artifact and never from a training curve.
+
+Statistics are **frozen at evaluation** — a normalizer whose running statistics keep updating during
+evaluation is a full-sample-scaling leak wearing a disguise — and are saved alongside the policy and restored
+together. A policy loaded without its normalizer is meaningless.
 
 ---
 

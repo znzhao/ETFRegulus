@@ -38,7 +38,7 @@ stress test, not a decision input. The two code paths are deliberately separate
 
 ### 1.2 `N` sensitivity
 
-Sweep `N ∈ {0, 7, 15, 21, 30, 42, 60, 90, 180}` with `D_max` fixed — the D16 operating range plus its
+Sweep `N ∈ {0, 7, 15, 18, 21, 25, 30, 36, 42, 50, 60, 90, 180}` with `D_max` fixed — the D16 operating range plus its
 out-of-distribution stress points. **Every cell at `N ∈ {0, 7, 90, 180}` is labelled out-of-distribution**
 in the output: the policy was not trained there, so those cells characterize degradation rather than
 measure performance. Report per `N`: realized max drawdown, return,
@@ -50,7 +50,7 @@ are actually being applied, because a silently-inert constraint looks exactly li
 
 ### 1.3 `D_max` sensitivity
 
-Sweep `D_max ∈ {0.05, 0.10, 0.15, 0.20, 0.25}` with `N` fixed. Report realized max drawdown, return, cash
+Sweep `D_max ∈ {0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15}` with `N` fixed. Report realized max drawdown, return, cash
 weight, and intervention rate.
 
 **This is the single most important robustness check in the project:**

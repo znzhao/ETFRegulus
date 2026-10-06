@@ -1,0 +1,21 @@
+# Stage 7 curriculum 3 of 5 -- the full parameter grid.
+#
+# Inherits every hyperparameter, the observation selection and the hard constraints
+# from the base configs. Only what this rung CHANGES is written below, so a diff
+# between two stage files is exactly the difficulty being added.
+extends:
+  - ../training.yaml
+
+# Curriculum stage 3 -- PARAMETERS.
+#
+# The full (N, D_max) grid from config/constraints.yaml. This is the rung where the
+# policy must actually CONDITION on its parameters rather than memorize one setting:
+# `N` and `D_max` are in the observation, and from here on they move every episode.
+#
+# The grid is inherited from constraints.yaml (D16) and deliberately not restated --
+# a second copy of the ladder is one edit away from training on a grid the evaluation
+# does not use.
+environment:
+  episode_lengths: [252]
+  risk_enabled: false
+  flat_start: true

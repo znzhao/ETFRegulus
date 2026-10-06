@@ -177,7 +177,7 @@ class HoldDaysSpec:
     """
 
     primary: int = 30
-    values: list[int] = field(default_factory=lambda: [14, 21, 30, 45, 60])
+    values: list[int] = field(default_factory=lambda: [15, 18, 21, 25, 30, 36, 42, 50, 60])
     weights: list[float] | None = field(
         default_factory=lambda: [0.15, 0.20, 0.30, 0.20, 0.15])
     stress_values: list[int] = field(default_factory=lambda: [0, 7, 90, 180])
@@ -205,7 +205,7 @@ class HoldDaysSpec:
 @dataclass(frozen=True)
 class MaxDrawdownSpec:
     primary: float = 0.15
-    values: list[float] = field(default_factory=lambda: [0.05, 0.10, 0.15, 0.20, 0.25])
+    values: list[float] = field(default_factory=lambda: [0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15])
     weights: list[float] | None = None
 
     def __post_init__(self) -> None:

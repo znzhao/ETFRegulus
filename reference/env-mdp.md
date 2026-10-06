@@ -102,13 +102,14 @@ Canonical definition in [../config/constraints.yaml](../config/constraints.yaml)
 lock:
   hold_days:
     primary: 30                              # the deployment value
-    values:  [15, 21, 30, 42, 60]            # the operating range: a sqrt(2) ladder,
-    weights: [0.15, 0.20, 0.30, 0.20, 0.15]  #   geometrically centred on 30
+    values:  [15, 18, 21, 25, 30, 36, 42, 50, 60]   # the operating range: a
+    weights: [0.06, 0.08, 0.11, 0.13, 0.24,      #   2^(1/4) ladder, geometrically
+              0.13, 0.11, 0.08, 0.06]            #   centred on 30
     stress_values: [0, 7, 90, 180]           # Stage 9 only, reported as OOD
 drawdown:
   max_drawdown:
-    primary: 0.15
-    values:  [0.05, 0.10, 0.15, 0.20, 0.25]
+    primary: 0.05
+    values:  [0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15]
     weights: null                            # uniform
 ```
 
@@ -204,12 +205,36 @@ puts the environment into capital-preservation mode rather than ending the episo
 
 ```python
 class ETFAllocationEnv(gymnasium.Env):
-    observation_space: Box(low=-inf, high=inf, shape=(obs_dim,), dtype=float32)
-    action_space:      Box(low=-inf, high=inf, shape=(K+1,), dtype=float32)  # pre-softmax logits
+    observation_space: Box(low=-clip, high=+clip, shape=(obs_dim,), dtype=float32)
+    action_space:      Box(low=-1.0,  high=+1.0,  shape=(K+1,), dtype=float32)
 
     def reset(self, seed=None, options=None) -> tuple[obs, info]: ...
     def step(self, action) -> tuple[obs, reward, terminated, truncated, info]: ...
 ```
+
+**Both spaces are bounded. This is a correction** — the original spec gave both as
+`Box(-inf, inf)`, which is wrong in two separate ways, found by running Stage 6's env
+checkers and its throughput sweep:
+
+* **The action space.** SB3 clips sampled actions to the action-space bounds, and clipping
+  to `+/-inf` is a no-op, so an unbounded space removes the only guard against a diverging
+  policy emitting a logit large enough to saturate the softmax into a one-hot — at which
+  point the gradient through it vanishes and training silently stalls. Worse, PPO's
+  Gaussian head starts at mean 0 with std ~1: on a wide space the initial policy only ever
+  samples a narrow band around zero, every action is a near-uniform allocation, and the
+  policy has to learn to inflate its own logits before it can express a concentrated
+  portfolio at all. Both `gymnasium` and SB3 `check_env` warn about exactly this.
+  The environment therefore takes a **normalized `[-1, 1]` action and scales it by
+  `LOGIT_SCALE = 10.0`** before the softmax. The policy works in the units it is good at,
+  and the softmax still sees a range spanning a weight ratio of `e^20` — far wider than
+  any allocation the projection would leave intact.
+
+* **The observation space.** The observation is clipped to `+/-clip` on assembly
+  (`config/observation.yaml`), so declaring it unbounded would describe a space the
+  environment cannot actually produce, and `check_env` would have nothing to verify.
+
+With both bounded, `gymnasium.utils.env_checker.check_env` and SB3's `check_env` pass with
+zero warnings.
 
 `info` carries the full diagnostics every step — projection distance, safety intervention, capital
 preservation, fallback, the executed weights, `N`, `D_max`. These are what build the trajectory artifact and

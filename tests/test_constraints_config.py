@@ -50,11 +50,21 @@ def test_the_operating_range_varies_but_stays_near_thirty(constraints):
 
 
 def test_the_ladder_steps_by_a_constant_factor(constraints):
-    """A sqrt(2) ladder, so each step away from 30 is the same relative change."""
+    """A geometric ladder, so each step away from 30 is the same RELATIVE change.
+
+    The factor itself is not pinned -- it was sqrt(2) at five rungs and is 2^(1/4) at
+    nine -- because refining the grid is a legitimate change. What must hold is that the
+    steps stay even: an evenly *spaced* grid over the same endpoints would put more
+    resolution above 30 than below it while looking symmetric.
+    """
     v = constraints.lock.hold_days.values
     ratios = [v[i + 1] / v[i] for i in range(len(v) - 1)]
     assert max(ratios) - min(ratios) < 0.1, f"uneven ladder: {ratios}"
-    assert all(1.3 < r < 1.55 for r in ratios), f"not a ~sqrt(2) ladder: {ratios}"
+    assert all(1.1 < r < 1.55 for r in ratios), f"not a geometric ladder: {ratios}"
+    # Rounding to whole days is what makes the ratios inexact; the span must still be
+    # the one the endpoints imply.
+    implied = (v[-1] / v[0]) ** (1.0 / (len(v) - 1))
+    assert min(ratios) <= implied <= max(ratios), (implied, ratios)
 
 
 def test_stress_points_are_outside_the_operating_range(constraints):

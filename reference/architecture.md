@@ -120,7 +120,7 @@ training:
   total_timesteps: 5_000_000
 constraints:
   lock:
-    hold_days: {values: [15, 21, 30, 42, 60]}   # the D16 operating range
+    hold_days: {values: [15, 18, 21, 25, 30, 36, 42, 50, 60]}   # the D16 operating range
   drawdown:
     max_drawdown: {values: [0.05, 0.10, 0.15, 0.20, 0.25]}
 ```

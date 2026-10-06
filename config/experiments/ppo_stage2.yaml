@@ -1,0 +1,20 @@
+# Stage 7 curriculum 2 of 5 -- the holding lock.
+#
+# Inherits every hyperparameter, the observation selection and the hard constraints
+# from the base configs. Only what this rung CHANGES is written below, so a diff
+# between two stage files is exactly the difficulty being added.
+extends:
+  - ../training.yaml
+
+# Curriculum stage 2 -- THE LOCK.
+#
+# Adds exactly one thing: the per-ETF holding lock, at three values bracketing the D16
+# primary. The ceiling stays fixed and the envelope stays off, so a regression against
+# stage 1 localizes to the lock and to nothing else.
+environment:
+  hold_days_values: [21, 30, 42]
+  hold_days_weights: null
+  fixed_max_drawdown: 0.20
+  episode_lengths: [252]
+  risk_enabled: false
+  flat_start: true

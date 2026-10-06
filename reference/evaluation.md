@@ -124,6 +124,23 @@ Detection: replay the decision through the projection and assert that the execut
 set given the information available at that decision. A mismatch is a preventable violation by definition, and
 this replay check runs automatically over every trajectory.
 
+The replay needs the action that was actually projected, so `trajectory.parquet` records `proj_weights`
+(and `raw_weights`, and the decision-time NAV/peak/drawdown) alongside the position that resulted. Inferring
+legality from the resulting position instead would be much weaker — prices move between the decision and the
+close, so a position tells you little about whether the action that produced it was legal.
+
+> **The detector must be given the dividend stream, and this is not optional.** A trajectory records shares at
+> the close, *after* distributions have been reinvested as share accretion. Accretion is deliberately exempt
+> from both the lock and the capital-preservation cap — it is a corporate action, not a trade, which is why
+> `Ledger.accrue_shares` is a separate entry point the lock manager never observes
+> ([portfolio-ledger.md](portfolio-ledger.md)). Comparing recorded closes directly therefore reports **every
+> distribution paid during a capital-preservation window as a cap breach**, which is exactly what happened the
+> first time this ran: 164 false positives on `equal_weight` in 2020 alone.
+>
+> The fix is exact, not a tolerance. Since `shares_close = shares_executed × (1 + div/close)`, the accretion
+> inverts cleanly. A threshold would not have worked: XLE paid \$0.2637 on 2020-03-23 into a collapsed \$11.79
+> price, a **2.24% one-day accretion**, which no plausible fixed band separates from real dip-buying.
+
 ### B. Market-forced violation — a constraint stress event
 
 - A locked asset could not be sold.
