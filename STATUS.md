@@ -11,16 +11,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (tests green) · `[
 
 | | |
 |---|---|
-| **Current stage** | **Phases 0–3 all complete.** Stages 0–12 green; hard acceptance passed at every stage. Grids refined twice more by request (finest: `N` 9 rungs, `D_max` 1–15% at 7 rungs) and retrained cleanly each time. Next: the full-budget training run — every result to date is at ~2% of `training.total_timesteps`. |
-| **Run this** | `python -m scripts.s08_walk_forward --config config/evaluation.yaml` (walk-forward), then `s09_stress` / `s10_bootstrap` / `s11_adversarial` / `s12_report` |
-| **Next gate** | None open — Phase 3 passed. The full-budget retrain is the next real milestone, not a gate. |
+| **Current stage** | **Phases 0–3 all complete.** Stages 0–12 green; hard acceptance passed at every stage. Every result to date is at ~2% of `training.total_timesteps`. **The full-budget run is now an incremental campaign** ([INCREMENTAL_TRAINING_PLAN.md](INCREMENTAL_TRAINING_PLAN.md)): built and tested, campaign `budget_v1` created at C0 from the 2% models, **no campaign training run yet**. |
+| **Run this** | Idle-time sessions: `python -m scripts.s14_incremental --status`, `--plan <hours>`, `--hours <hours>`, `--stop`. The first session begins by evaluating C0 (~30 min) |
+| **Next gate** | None open — Phase 3 passed. Next milestone: C0 evaluated (should reproduce test Sharpe 0.92), then C1 (4%). |
 | **Lock period** | `N = 30` calendar days (D16); operating range `[15, 18, 21, 25, 30, 36, 42, 50, 60]` (2^(1/4) ladder) in `config/constraints.yaml` |
 | **Drawdown ceiling** | `D_max = 0.05` primary; operating range `[0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15]` — revised from the original `[0.05..0.25]` down to `[0.001..0.10]` and finally to this range, each time by explicit request, each time retrained |
 | **Risk envelope** | **Calibrated** (Q1 closed): `quantile 0.05, horizon 5, aggregation max, measure cvar` |
 | **Latest walk-forward run** | `s08_walk_forward_20260903T224114Z_a207776c` — **14/14 folds (2012–2025)**, hard acceptance PASSED, on the current grids |
 | **Latest acceptance (Stage 12, unconstrained baselines only, N=30 / D_max=5%, 2012–2025)** | **22/22** — `rl_policy` Sharpe 0.92 leads all six baselines (`spy_tlt_60_40` 0.90, `spy_buy_hold` 0.89, `equal_weight` 0.83, `classical_optimizer` 0.78, `momentum` 0.74, `cash` 0.00). Bootstrap Sharpe band 0.47–1.41 (median 0.95), fully above zero. |
-| **Test suite** | 373 passed, 3 deselected (`network`, `slow`), ~60s — `.venv/Scripts/python.exe -m pytest -q` |
-| **Last updated** | 2026-09-04 |
+| **Test suite** | 393 passed, 5 deselected (`network`, `slow`), ~190s — `.venv/Scripts/python.exe -m pytest -q` |
+| **Last updated** | 2026-10-05 |
 
 ---
 
@@ -631,3 +631,7 @@ until it is built.
 | 2026-09-03 | **At the 5% ceiling the policy now beats three of four constrained baselines on Sortino** (1.33 vs spy_tlt_60_40* 1.23, spy_buy_hold* 0.95, equal_weight* 1.13), losing only to momentum_constrained (1.62). Bootstrap band 0.66-2.08 (median 1.33) corroborates it. Acceptance 27/28 at 5%, its best result yet. At 1%, 10% and 15% the policy still trails most baselines (18/28, 23/28, 23/28). |
 | 2026-09-04 | **2025 added to the backtest.** `folds.json` already carried `fold_2025` from Stage 3 (250 sessions, its own scaler); only `--last-year` needed to move. Retrained cleanly, 14/14 folds, hard acceptance passed; Stage 9 monotonicity and Stage 11 zero-violations both still hold. 2025 alone: `high_entropy_slow` selected, +7.37% return, 16.51% max DD, zero preventable violations. |
 | 2026-09-04 | **At N=30, D_max=5%, 2012-2025, market benchmarks only: acceptance is 22/22.** `rl_policy` Sharpe 0.92 leads all six baselines, including spy_tlt_60_40 (0.90) and spy_buy_hold (0.89) for the first time on a like-for-like unconstrained comparison. Bootstrap Sharpe band 0.47-1.41 (median 0.95) sits entirely above zero. Still a single seed at ~2% of the configured training budget. |
+| 2026-10-05 | **The full-budget run becomes an incremental campaign**, grown in idle-time sessions with an evaluation at each budget doubling (2, 4, 8, 16, 32, 64, 100%), each compared with the baselines and every earlier checkpoint. Plan and record: [INCREMENTAL_TRAINING_PLAN.md](INCREMENTAL_TRAINING_PLAN.md). Built as `scripts/s14_incremental.py` + `src/training/incremental.py` + `src/evaluation/learning_curve.py`; fold scoring moved to `src/evaluation/fold_eval.py`, shared with Stage 8 unchanged. |
+| 2026-10-05 | **A resumed run is bit-identical to an uninterrupted one**, proven by a slow test (weights, Adam state, reward normalizer). Achieved by one `learn()` per rollout with a forced env reset and a seed derived from `(candidate seed, rollouts done)`, so the learning curve does not depend on where sessions stopped. Budget is counted in whole 16,384-step rollouts: the 2% run asked for 40,000 timesteps and SB3 ran 49,152 = 3 rollouts, which is exactly C0. |
+| 2026-10-05 | **Campaign `budget_v1` created from `s08_walk_forward_20260903T224114Z_a207776c`** — all 56 models verified (hyperparameters, seed, 49,152 timesteps) and copied; the source run is untouched. CPU, by decision. |
+| 2026-10-05 | **Observation, not changed: the KL early-stop truncates the lr 3e-4 candidates.** `base` and `high_entropy` stopped inside the first of 10 PPO epochs on every rollout in all 14 folds (`target_kl = 0.02`); the lr 1e-4 candidates ran up to 10. Kept as-is by decision so the 2% models remain a valid C0 and because it is a tuning question for validation years; the learning curve reports epochs per rollout at every checkpoint. |
