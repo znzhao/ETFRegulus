@@ -168,6 +168,57 @@ def test_reconcile_recovers_a_checkpoint_snapshot_the_crash_skipped(tmp_path: Pa
     assert (mdir / "C1" / COMPLETE).exists()
 
 
+# ------------------------------------------------------ inserting a checkpoint
+
+
+def _on_disk(tmp_path: Path, camp: dict) -> None:
+    """Write current state + a snapshot dir per recorded snapshot, like a real campaign."""
+    by_label = {c["label"]: c["rollouts"] for c in camp["schedule"]}
+    for key, cand in camp["candidates"].items():
+        mdir = tmp_path / "models" / key
+        for lab in cand["snapshots"]:
+            write_state(_FakeModel(ROLLOUT * by_label[lab]), _FakeVec(), mdir / lab)
+        write_state(_FakeModel(ROLLOUT * cand["rollouts"]), _FakeVec(), mdir / "current")
+
+
+def test_a_checkpoint_inserted_mid_campaign_rolls_back_whoever_passed_it(tmp_path: Path):
+    from src.training.incremental import insert_checkpoint
+
+    camp = _campaign({"2012/base": 20, "2013/base": 10})
+    camp["checkpoints"] = {"C0": {"status": "reported"}, "C1": {"status": "reported"},
+                           "C2": {"status": "reported"}}
+    _on_disk(tmp_path, camp)
+    insert_checkpoint(tmp_path, camp, 12)
+
+    labels = [(c["label"], c["pct"], c["rollouts"]) for c in camp["schedule"]]
+    assert labels[2:5] == [("C2", 8, 10), ("C2b", 12, 15), ("C3", 16, 20)]
+    ahead = camp["candidates"]["2012/base"]
+    assert ahead["rollouts"] == 10
+    assert "C3" not in ahead["snapshots"]
+    assert not (tmp_path / "models" / "2012" / "base" / "C3").exists()
+    assert recover_state(tmp_path / "models" / "2012" / "base" / "current") == ROLLOUT * 10
+    assert camp["candidates"]["2013/base"]["rollouts"] == 10
+    assert next_target(camp)["label"] == "C2b"
+    # The rolled-back state is consistent with what is on disk.
+    assert reconcile(tmp_path, camp, ROLLOUT) == []
+
+
+def test_a_checkpoint_cannot_be_inserted_before_one_already_evaluated():
+    from src.training.incremental import insert_checkpoint
+
+    camp = _campaign({"2012/base": 20})
+    camp["checkpoints"] = {"C3": {"status": "evaluating"}}
+    with pytest.raises(CampaignError, match="cannot be inserted"):
+        insert_checkpoint(Path("."), camp, 12)
+
+
+def test_a_duplicate_checkpoint_is_refused():
+    from src.training.incremental import insert_checkpoint
+
+    with pytest.raises(CampaignError, match="already a checkpoint"):
+        insert_checkpoint(Path("."), _campaign({"2012/base": 10}), 8)
+
+
 # ------------------------------------------------------------------- planning
 
 

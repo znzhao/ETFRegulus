@@ -474,6 +474,15 @@ def main(resolved: dict, ctx: StageContext) -> None:
     acceptance = None
     if not args.no_acceptance:
         wf = _latest("s08_walk_forward_*/walk_forward_summary.json")
+        # The acceptance table must describe the SAME run as the rl_policy column. A
+        # --policy-runs directory that carries its own summary (an incremental checkpoint,
+        # or an older Stage 8 run) wins over "the newest Stage 8 run".
+        if args.policy_runs and args.policy_runs not in ("latest", ""):
+            own = Path(args.policy_runs)
+            own = own if own.exists() else RUNS / args.policy_runs
+            if (own / "walk_forward_summary.json").exists():
+                wf = json.loads((own / "walk_forward_summary.json").read_text(encoding="utf-8"))
+                ctx.log(f"acceptance: walk-forward criteria from {own}")
         st = _latest("s09_stress_*/stress_summary.json")
         bs = _latest("s10_bootstrap_*/bootstrap_summary.json")
         adv = _latest("s11_adversarial_*/adversarial_summary.json")
