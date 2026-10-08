@@ -243,6 +243,63 @@ def model_dir(directory: Path, key: str) -> Path:
     return directory / "models" / year / name
 
 
+def insert_checkpoint(directory: Path, campaign: dict, pct: float) -> list[str]:
+    """Add a checkpoint to a running campaign's schedule. Returns notes.
+
+    A checkpoint is an exact snapshot at its rollout count, so a candidate that has already
+    trained past it is rolled back to its latest earlier snapshot and retrains from there.
+    Training is a deterministic function of (state, chunk seed), so the retrained path is
+    the one it already took; the cost is only the repeated rollouts. Refused if any later
+    checkpoint has started evaluation, since its comparison to "the previous checkpoint"
+    would change underneath it.
+    """
+    rollouts = math.ceil(campaign["total_timesteps"] * pct / 100 / campaign["rollout_size"])
+    schedule = campaign["schedule"]
+    if any(cp["rollouts"] == rollouts for cp in schedule):
+        raise CampaignError(f"{pct}% is {rollouts} rollouts, which is already a checkpoint")
+    later = [cp for cp in schedule if cp["rollouts"] > rollouts]
+    for cp in later:
+        if campaign["checkpoints"].get(cp["label"], {}).get("status") in ("evaluating",
+                                                                          "reported"):
+            raise CampaignError(f"{cp['label']} is already {campaign['checkpoints'][cp['label']]['status']}; "
+                                "a checkpoint cannot be inserted before it")
+    earlier = [cp for cp in schedule if cp["rollouts"] < rollouts]
+    if not earlier:
+        raise CampaignError("a checkpoint cannot be inserted before C0")
+    base = earlier[-1]
+    label = base["label"] + "b"
+    while any(cp["label"] == label for cp in schedule):
+        label += "b"
+    entry = {"label": label, "pct": pct, "rollouts": rollouts,
+             "timesteps": rollouts * campaign["rollout_size"]}
+
+    notes = []
+    later_labels = {cp["label"] for cp in later}
+    for key, cand in campaign["candidates"].items():
+        if cand["rollouts"] <= rollouts:
+            continue
+        mdir = model_dir(directory, key)
+        snapshot(mdir / base["label"], mdir / "current")
+        snap = cand["snapshots"][base["label"]]
+        notes.append(f"{key}: rolled back {cand['rollouts']} -> {base['rollouts']} rollouts "
+                     f"({base['label']}) to pass through {label}")
+        cand["rollouts"] = base["rollouts"]
+        cand["n_updates"] = snap["n_updates"]
+        cand["last_diag"] = snap.get("diag", {})
+        for lab in list(cand.get("snapshots", {})):
+            if lab in later_labels:
+                del cand["snapshots"][lab]
+                stale = mdir / lab
+                if stale.exists():
+                    _retry(shutil.rmtree, stale)
+    for cp in later:
+        campaign["checkpoints"].pop(cp["label"], None)
+    schedule.insert(schedule.index(later[0]) if later else len(schedule), entry)
+    notes.append(f"checkpoint {label} added at {pct}% = {rollouts} rollouts "
+                 f"({entry['timesteps']:,} timesteps)")
+    return notes
+
+
 def reconcile(directory: Path, campaign: dict, rollout_size: int) -> list[str]:
     """Make the campaign file agree with what is actually on disk. Returns notes."""
     notes = []

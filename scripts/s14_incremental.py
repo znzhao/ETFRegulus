@@ -5,6 +5,7 @@
     python -m scripts.s14_incremental --plan 2          # what 2 idle hours would buy; no compute
     python -m scripts.s14_incremental --hours 2         # a session: train / evaluate until the deadline
     python -m scripts.s14_incremental --stop            # ask a running session to stop after its rollout
+    python -m scripts.s14_incremental --add-checkpoint 12   # insert a checkpoint at 12% of the budget
 
 A session does, in a loop and until its deadline: evaluate any checkpoint every candidate
 has reached (walk-forward validation + selection + test, then the Stage 12 report, then
@@ -57,6 +58,7 @@ from src.training.incremental import (
     checkpoint_schedule,
     chunk_seed,
     ema,
+    insert_checkpoint,
     load_campaign,
     load_for_training,
     mark_complete,
@@ -632,6 +634,9 @@ def main(argv=None) -> int:
     mode.add_argument("--hours", type=float, help="run a session of this many hours")
     mode.add_argument("--stop", action="store_true",
                       help="ask a running session to stop after its current rollout")
+    mode.add_argument("--add-checkpoint", type=float, metavar="PCT",
+                      help="insert a checkpoint at PCT%% of the budget; candidates already "
+                           "past it are rolled back to their previous snapshot")
     p.add_argument("--margin-minutes", type=float, default=5.0,
                    help="stop this long before the stated idle time runs out")
     p.add_argument("--replicates", type=int, default=1000,
@@ -645,6 +650,15 @@ def main(argv=None) -> int:
             return 0
         if args.plan is not None:
             plan(args)
+            return 0
+        if args.add_checkpoint is not None:
+            cdir = campaign_dir(args.campaign)
+            campaign = load_campaign(cdir)
+            for note in reconcile(cdir, campaign, campaign["rollout_size"]):
+                print(f"reconcile: {note}")
+            for note in insert_checkpoint(cdir, campaign, args.add_checkpoint):
+                print(note)
+            save_campaign(cdir, campaign)
             return 0
         if args.stop:
             cdir = campaign_dir(args.campaign)
