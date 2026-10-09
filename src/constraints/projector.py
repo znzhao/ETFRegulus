@@ -38,6 +38,9 @@ class ProjectionDiagnostics:
     capital_preservation: bool = False
     infeasible_fallback: bool = False
     budget_degenerate: bool = False   # sum(w_lower) > 1 after a gap
+    #: Over budget under the `no_risk_increase` rule (D-F): the action was held to "no
+    #: riskier than the current holdings" instead of being replaced by `w_safe`.
+    no_risk_increase: bool = False
 
     def changed(self) -> bool:
         return self.l1_distance > 1e-12
@@ -51,6 +54,7 @@ class ProjectionDiagnostics:
             "capital_preservation": self.capital_preservation,
             "infeasible_fallback": self.infeasible_fallback,
             "budget_degenerate": self.budget_degenerate,
+            "no_risk_increase": self.no_risk_increase,
         }
 
 
@@ -223,6 +227,13 @@ class AnalyticProjector:
 
     alpha_tolerance: float = 1e-3
     max_bisection_steps: int = 32
+    #: See `ProjectionSpec.over_budget_rule`. `freeze` is the original behaviour.
+    over_budget_rule: str = "freeze"
+
+    def _uses_d_f(self, risk, current_weights) -> bool:
+        """D-F needs a risk model to compare with, and the holdings to compare against."""
+        return (self.over_budget_rule == "no_risk_increase" and risk is not None
+                and current_weights is not None)
 
     def project(
         self, raw_action: np.ndarray, *, lower_bounds: np.ndarray,
@@ -241,8 +252,13 @@ class AnalyticProjector:
         diag.availability_clipped = int(np.count_nonzero((~mask) & (y > 1e-12)))
         diag.lock_bound_active = int(np.count_nonzero(lower > 1e-12))
 
+        # Under D-F, capital preservation is enforced by the risk rule (no action riskier
+        # than the current holdings) rather than by capping every weight, which would also
+        # forbid buying a hedge. The share-count guard against drift-buying stays, in
+        # `engine.advance`.
+        d_f = self._uses_d_f(risk, current_weights)
         upper = capital_preservation_caps(
-            lower, current_weights, mask) if capital_preservation else None
+            lower, current_weights, mask) if capital_preservation and not d_f else None
         if capital_preservation:
             diag.capital_preservation = True
 
@@ -250,7 +266,9 @@ class AnalyticProjector:
         diag.budget_degenerate = degenerate
 
         if risk is not None:
-            w = self._derisk(w, lower, mask, risk, diag)
+            w = self._derisk(w, lower, mask, risk, diag,
+                             current_weights=current_weights if d_f else None,
+                             over_budget=capital_preservation)
 
         w = np.maximum(w, 0.0)
         total = w.sum()
@@ -261,14 +279,25 @@ class AnalyticProjector:
         diag.l2_distance = float(np.linalg.norm(w - raw_action))
         return ProjectedAction(weights=w, diagnostics=diag)
 
-    def _derisk(self, w, lower, mask, risk: RiskModel, diag: ProjectionDiagnostics):
-        """Blend toward `w_safe` until the stressed loss fits the budget."""
+    def _derisk(self, w, lower, mask, risk: RiskModel, diag: ProjectionDiagnostics,
+                current_weights: np.ndarray | None = None, over_budget: bool = False):
+        """Blend toward `w_safe` until the stressed loss fits the budget.
+
+        With `current_weights` given (the D-F rule), a state in which even `w_safe`
+        breaches the budget -- or capital preservation -- is handled by
+        `_no_risk_increase` instead of being frozen into `w_safe`.
+        """
         budget = risk.budget()
+        if current_weights is not None and over_budget:
+            return self._no_risk_increase(w, mask, risk, diag, current_weights, budget)
         if risk.stress_loss(w) <= budget:
             return w
 
         diag.risk_binding = True
         w_safe = safe_portfolio(lower, mask)
+
+        if current_weights is not None and risk.stress_loss(w_safe) > budget:
+            return self._no_risk_increase(w, mask, risk, diag, current_weights, budget)
 
         if risk.stress_loss(w_safe) > budget:
             # Even the minimum-risk reachable portfolio breaches. That is a MARKET-FORCED
@@ -303,6 +332,48 @@ class AnalyticProjector:
         diag.de_risk_alpha = lo_a
         return candidate
 
+    def _no_risk_increase(self, w, mask, risk: RiskModel, diag: ProjectionDiagnostics,
+                          current_weights: np.ndarray, budget: float):
+        """Redesign decision D-F: over budget, no executed action may add risk.
+
+        The reference is the CURRENT holdings (doing nothing), which are reachable by
+        construction: every locked position sits exactly at its floor in them. An action
+        whose stressed loss is no larger than the reference's -- or within the budget, if
+        that is looser -- is executed as proposed, so a hedge bought with cash goes
+        through at whatever size the agent chose. A riskier action is scaled back along
+        the segment toward the reference until it is not riskier. The layer never picks
+        assets of its own: it is a floor, not a second strategy.
+
+        The bisection is sound for the same reason as the `w_safe` one: `stress_loss` is
+        convex along the segment, and the reference satisfies the bound.
+        """
+        ref = np.where(mask, np.maximum(np.asarray(current_weights, dtype=float), 0.0), 0.0)
+        total = float(ref.sum())
+        ref = ref / total if total > 0 else safe_portfolio(np.zeros_like(ref), mask)
+        bound = max(budget, risk.stress_loss(ref))
+        diag.no_risk_increase = True
+        tol = 1e-12
+        if risk.stress_loss(w) <= bound + tol:
+            diag.de_risk_alpha = 1.0
+            return w
+
+        diag.risk_binding = True
+        lo_a, hi_a = 0.0, 1.0
+        for _ in range(self.max_bisection_steps):
+            if hi_a - lo_a < self.alpha_tolerance:
+                break
+            mid = 0.5 * (lo_a + hi_a)
+            if risk.stress_loss(mid * w + (1.0 - mid) * ref) <= bound + tol:
+                lo_a = mid
+            else:
+                hi_a = mid
+        candidate = lo_a * w + (1.0 - lo_a) * ref
+        if risk.stress_loss(candidate) > bound + tol:
+            diag.de_risk_alpha = 0.0
+            return ref
+        diag.de_risk_alpha = lo_a
+        return candidate
+
 
 # ------------------------------------------------------------------------- cvxpy
 
@@ -319,6 +390,7 @@ class CvxpyProjector:
     alpha_tolerance: float = 1e-3
     max_bisection_steps: int = 32
     solver: str | None = None
+    over_budget_rule: str = "freeze"
 
     def project(
         self, raw_action: np.ndarray, *, lower_bounds: np.ndarray,
@@ -339,8 +411,11 @@ class CvxpyProjector:
         diag.availability_clipped = int(np.count_nonzero((~mask) & (y > 1e-12)))
         diag.lock_bound_active = int(np.count_nonzero(lower > 1e-12))
 
+        analytic = AnalyticProjector(self.alpha_tolerance, self.max_bisection_steps,
+                                     self.over_budget_rule)
+        d_f = analytic._uses_d_f(risk, current_weights)
         upper = capital_preservation_caps(
-            lower, current_weights, mask) if capital_preservation else None
+            lower, current_weights, mask) if capital_preservation and not d_f else None
         if capital_preservation:
             diag.capital_preservation = True
 
@@ -364,8 +439,9 @@ class CvxpyProjector:
             w[idx] = np.maximum(np.asarray(v.value).ravel(), 0.0)
 
         if risk is not None:
-            w = AnalyticProjector(self.alpha_tolerance, self.max_bisection_steps)._derisk(
-                w, lower, mask, risk, diag)
+            w = analytic._derisk(w, lower, mask, risk, diag,
+                                 current_weights=current_weights if d_f else None,
+                                 over_budget=capital_preservation)
 
         w = np.maximum(w, 0.0)
         total = w.sum()
@@ -377,9 +453,14 @@ class CvxpyProjector:
 
 
 def make_projector(backend: Literal["analytic", "cvxpy"] = "analytic",
-                   alpha_tolerance: float = 1e-3) -> FeasibilityProjector:
+                   alpha_tolerance: float = 1e-3,
+                   over_budget_rule: str = "freeze") -> FeasibilityProjector:
+    if over_budget_rule not in ("freeze", "no_risk_increase"):
+        raise ValueError(f"unknown over_budget_rule: {over_budget_rule!r}")
     if backend == "analytic":
-        return AnalyticProjector(alpha_tolerance=alpha_tolerance)
+        return AnalyticProjector(alpha_tolerance=alpha_tolerance,
+                                 over_budget_rule=over_budget_rule)
     if backend == "cvxpy":
-        return CvxpyProjector(alpha_tolerance=alpha_tolerance)
+        return CvxpyProjector(alpha_tolerance=alpha_tolerance,
+                              over_budget_rule=over_budget_rule)
     raise ValueError(f"unknown projection backend: {backend!r}")

@@ -165,7 +165,16 @@ def advance(
     # read as "restore yesterday's weight", which in a falling market means buying the dip
     # every session -- the exact opposite of what it is for.
     max_shares = None
-    if dec.capital_preservation:
+    if diag.no_risk_increase:
+        # D-F: the risk rule approved this action against the current holdings, but in
+        # WEIGHT terms. Executing weights at the next open would still drift-buy any asset
+        # that fell overnight. So every asset the agent did not deliberately raise keeps
+        # its share count capped; only a deliberate increase -- a hedge the rule let
+        # through -- may add shares.
+        cur_w = dec.ctx.current_weights
+        max_shares = {t: st.ledger.get(t) for j, t in enumerate(universe)
+                      if projected.weights[j + 1] <= cur_w[j + 1] + 1e-9}
+    elif dec.capital_preservation:
         max_shares = {t: st.ledger.get(t) for t in universe}
 
     result = execute(
@@ -191,23 +200,113 @@ def advance(
     st.peak = val.peak
     reward = float(np.log(val.nav / dec.nav))
 
+    row = _trajectory_row(
+        market, st, cfg, nxt, val, dec, diag, reward=reward, turnover=result.turnover,
+        cost_paid=result.cost_paid, proj_weights=projected.weights, raw_weights=a_raw,
+        share_floor_binding=result.share_floor_binding,
+        preservation_cap_binding=result.preservation_cap_binding, decision=True)
+    return Outcome(row=row, reward=reward, nav=val.nav,
+                   lock_violations=n_lock_violations, diagnostics=diag,
+                   projected=projected.weights)
+
+
+def hold(market: MarketData, st: EngineState, cfg: SimulationConfig, i: int,
+         dec: Decision) -> Outcome:
+    """A session with no decision: nothing is projected, nothing is executed.
+
+    Event-driven decisions (redesign Phase 2) hold the book between decision points.
+    Holding must be a genuine no-op: re-asking for the current WEIGHTS would still trade at
+    the next open, because prices move overnight, and any purchase relocks the position.
+    So the ledger is only marked to the next close, with distributions reinvested exactly
+    as on a trading session -- accretion is a corporate action, not a trade, and is
+    exempt from the lock.
+    """
+    nxt = i + 1
+    universe = market.universe
+    next_closes = market.prices_at(nxt, "close_raw")
+    divs = {t: float(market.div_per_share[nxt, j]) for j, t in enumerate(universe)}
+    val = value(st.ledger, next_closes, peak=st.peak, div_per_share=divs)
+    st.peak = val.peak
+    reward = float(np.log(val.nav / dec.nav))
+    cur = np.asarray(dec.ctx.current_weights, dtype=float)
+    row = _trajectory_row(
+        market, st, cfg, nxt, val, dec, ProjectionDiagnostics(), reward=reward,
+        turnover=0.0, cost_paid=0.0, proj_weights=cur, raw_weights=cur,
+        share_floor_binding=0, preservation_cap_binding=0, decision=False)
+    return Outcome(row=row, reward=reward, nav=val.nav, lock_violations=0,
+                   diagnostics=None, projected=cur)
+
+
+class DecisionClock:
+    """When an event-driven agent decides (redesign decision: weekly plus key events).
+
+    A decision is due on the first session, then every `cadence` sessions, and at once
+    when a held position UNLOCKS (new freedom to act) or when the capital-preservation
+    state flips (the drawdown crosses the ceiling either way). `cadence = 0` means every
+    session -- the original daily behaviour.
+
+    It is fed every session's context, decision or not, because the events are changes
+    between consecutive sessions. Training (`ETFAllocationEnv`) and evaluation
+    (`PolicyWeightSource`) use this one class, so a policy is evaluated on exactly the
+    schedule it was trained on.
+    """
+
+    def __init__(self, cadence: int):
+        self.cadence = int(cadence)
+        self.reset()
+
+    def reset(self) -> None:
+        self._last: int | None = None
+        self._locked: np.ndarray | None = None
+        self._preservation: bool | None = None
+
+    def due(self, ctx: StepContext) -> bool:
+        if self.cadence <= 0:
+            return True
+        held = np.asarray(ctx.current_weights, dtype=float)[1:] > 1e-12
+        locked = (np.asarray(ctx.lock_remaining_days, dtype=float) > 0) & held
+        preservation = bool(ctx.drawdown > ctx.max_drawdown)
+        unlocked = (self._locked is not None
+                    and bool((self._locked & ~locked & held).any()))
+        flipped = self._preservation is not None and preservation != self._preservation
+        due = (self._last is None or ctx.step - self._last >= self.cadence
+               or unlocked or flipped)
+        self._locked = locked
+        self._preservation = preservation
+        if due:
+            self._last = ctx.step
+        return due
+
+
+def _trajectory_row(market: MarketData, st: EngineState, cfg: SimulationConfig, nxt: int,
+                    val, dec: Decision, diag: ProjectionDiagnostics, *, reward: float,
+                    turnover: float, cost_paid: float, proj_weights: np.ndarray,
+                    raw_weights: np.ndarray, share_floor_binding: int,
+                    preservation_cap_binding: int, decision: bool) -> dict:
+    """One trajectory row, shared by decision and hold sessions so they cannot drift."""
+    universe = market.universe
+    next_closes = market.prices_at(nxt, "close_raw")
+    exec_session = market.sessions[nxt].date()
     row = {
         "session": market.sessions[nxt],
         "nav": val.nav, "peak_nav": val.peak, "drawdown": val.drawdown,
         "cash": st.ledger.cash,
         "reward": reward,
-        "turnover": result.turnover,
-        "cost_paid": result.cost_paid,
+        "turnover": turnover,
+        "cost_paid": cost_paid,
         "proj_distance": diag.l1_distance,
         "safety_intervened": bool(diag.risk_binding),
         "capital_preservation": bool(diag.capital_preservation),
         "infeasible_fallback": bool(diag.infeasible_fallback),
+        "no_risk_increase": bool(diag.no_risk_increase),
         "budget_degenerate": bool(diag.budget_degenerate),
         "de_risk_alpha": diag.de_risk_alpha,
         "availability_clipped": diag.availability_clipped,
         "lock_bound_active": diag.lock_bound_active,
-        "share_floor_binding": result.share_floor_binding,
-        "preservation_cap_binding": result.preservation_cap_binding,
+        "share_floor_binding": share_floor_binding,
+        "preservation_cap_binding": preservation_cap_binding,
+        # False on sessions an event-driven agent held through without deciding.
+        "decision": bool(decision),
         "n_param": cfg.hold_days, "dmax_param": cfg.max_drawdown,
         "drawdown_budget": headroom(val.nav, val.peak, cfg.max_drawdown),
         "risk_budget": risk_budget(dec.nav, dec.ctx.peak, cfg.max_drawdown),
@@ -215,8 +314,8 @@ def advance(
         # preventable-violation detector can replay the decision rather than infer it
         # from the position that resulted. Without this, "the executed action was in the
         # feasible set" is an assertion the trajectory cannot support.
-        "proj_weights": projected.weights.astype(float).copy(),
-        "raw_weights": a_raw.astype(float).copy(),
+        "proj_weights": np.asarray(proj_weights, dtype=float).copy(),
+        "raw_weights": np.asarray(raw_weights, dtype=float).copy(),
         # The decision-time state the replay needs, before the trade moved anything.
         "decision_nav": float(dec.nav),
         "decision_peak": float(dec.ctx.peak),
@@ -229,10 +328,7 @@ def advance(
         row[f"locked_{t}"] = st.lock_manager.is_locked(t, exec_session)
         unlock = st.lock_manager.unlock_dates.get(t)
         row[f"unlock_date_{t}"] = pd.Timestamp(unlock) if unlock else pd.NaT
-
-    return Outcome(row=row, reward=reward, nav=val.nav,
-                   lock_violations=n_lock_violations, diagnostics=diag,
-                   projected=projected.weights)
+    return row
 
 
 def reservoir_entry(market: MarketData, st: EngineState, cfg: SimulationConfig,

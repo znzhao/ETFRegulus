@@ -18,10 +18,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.env.etf_env import softmax_weights
+from src.env.etf_env import onto_free_capital, softmax_weights
 from src.env.feature_store import FeatureStore
 from src.env.observation import ObservationSpec
 from src.env.state_builder import build_observation
+from src.sim.engine import DecisionClock
 from src.sim.simulator import MarketData, StepContext
 
 
@@ -35,7 +36,8 @@ class PolicyWeightSource:
 
     def __init__(self, model, spec: ObservationSpec, store: FeatureStore,
                  market: MarketData, *, hold_days: int, max_drawdown: float,
-                 deterministic: bool = True):
+                 deterministic: bool = True, decision_cadence: int = 0,
+                 action_mode: str = "full"):
         self.model = model
         self.spec = spec
         self.store = store
@@ -46,21 +48,33 @@ class PolicyWeightSource:
         self._buffer = np.zeros(spec.size, dtype=np.float32)
         self._nav_at_reset: float | None = None
         self.n_calls = 0
+        self.action_mode = action_mode
+        # The SAME clock the environment trains under, so the policy is evaluated on the
+        # schedule it learned on. Between decisions it returns None: hold, do not trade.
+        self._clock = DecisionClock(decision_cadence)
 
     def reset(self) -> None:
         self._nav_at_reset = None
         self.n_calls = 0
+        self._clock.reset()
 
-    def __call__(self, session: pd.Timestamp, ctx: StepContext) -> np.ndarray:
+    def __call__(self, session: pd.Timestamp, ctx: StepContext) -> np.ndarray | None:
         if self._nav_at_reset is None:
             self._nav_at_reset = float(ctx.nav)
+        if not self._clock.due(ctx):
+            return None
         row = self.store.index_of_session(session)
         obs = build_observation(
             self.spec, self.store, row, ctx,
             hold_days=self.hold_days, max_drawdown=self.max_drawdown,
             nav_at_reset=self._nav_at_reset, out=self._buffer)
         self.n_calls += 1
-        return policy_weights(self.model, obs, deterministic=self.deterministic)
+        s = policy_weights(self.model, obs, deterministic=self.deterministic)
+        if self.action_mode == "full":
+            return s
+        # `policy_weights` already turned the action(s) into a point on the simplex (for an
+        # ensemble, the average); map it onto the free capital as the environment does.
+        return onto_free_capital(s, ctx)
 
 
 def policy_weights(model, obs, *, deterministic: bool = True) -> np.ndarray:
@@ -105,9 +119,12 @@ def rollout(model, bundle, *, hold_days: int, max_drawdown: float,
 
     sim_cfg = build_sim_config(bundle.resolved, bundle.constraints,
                                hold_days=hold_days, max_drawdown=max_drawdown, seed=seed)
+    env_cfg = getattr(bundle, "env_cfg", None)
     source = PolicyWeightSource(model, bundle.spec, bundle.store, bundle.market,
                                 hold_days=hold_days, max_drawdown=max_drawdown,
-                                deterministic=deterministic)
+                                deterministic=deterministic,
+                                decision_cadence=getattr(env_cfg, "decision_cadence", 0),
+                                action_mode=getattr(env_cfg, "action_mode", "full"))
     return simulate(
         bundle.market, source, sim_cfg,
         projector=make_projector_from(bundle.constraints),

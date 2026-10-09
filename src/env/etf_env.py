@@ -39,7 +39,7 @@ from src.env.feature_store import FeatureStore
 from src.env.observation import ObservationSpec
 from src.env.reset_sampler import InitialState, ResetSampler, flat_state
 from src.env.state_builder import build_observation
-from src.sim.engine import EngineState, advance, observe
+from src.sim.engine import DecisionClock, EngineState, advance, hold, observe
 from src.sim.simulator import MarketData, SimulationConfig
 
 #: The action space is `Box(-1, 1)`, and the environment scales it by `LOGIT_SCALE` before
@@ -92,6 +92,15 @@ class EnvConfig:
     strict: bool = True
     fixed_hold_days: int | None = None
     fixed_max_drawdown: float | None = None
+    #: Redesign Phase 2. 0 = decide every session (the original). k > 0 = decide every k
+    #: sessions and at once on an unlock or a capital-preservation flip; hold in between,
+    #: and return the reward accumulated over the whole interval.
+    decision_cadence: int = 0
+    #: `full`: the action is the whole target portfolio (the original). `free_capital`: the
+    #: action allocates only the capital the lock leaves free -- locked positions keep their
+    #: floor, and weight put on a locked ETF is a purchase that relocks it. Feasible under
+    #: the lock by construction.
+    action_mode: str = "full"
 
 
 class InvariantViolation(AssertionError):
@@ -164,6 +173,9 @@ class ETFAllocationEnv(gym.Env):
         self._steps = 0
         self._nav_at_reset = 1.0
         self._feature_offset = 0
+        self._clock = DecisionClock(cfg.decision_cadence)
+        if cfg.action_mode not in ("full", "free_capital"):
+            raise ValueError(f"unknown action_mode {cfg.action_mode!r}")
         if seed is not None:
             super().reset(seed=seed)
 
@@ -237,6 +249,8 @@ class ETFAllocationEnv(gym.Env):
 
         dec = observe(self.market, self.state, self.sim_cfg, row, envelope=None)
         self._nav_at_reset = float(dec.nav)
+        self._clock.reset()
+        self._clock.due(dec.ctx)          # the first session is always a decision
 
         self.episode = EpisodeSpec(
             hold_days=hold_days, max_drawdown=max_drawdown, length=length,
@@ -263,21 +277,41 @@ class ETFAllocationEnv(gym.Env):
                       envelope=self.envelope if self.cfg.risk_enabled else None)
         before = self.state.ledger.share_vector(self.market.universe)
 
-        a_raw = softmax_weights(action)
+        a_raw = target_weights(action, dec.ctx, self.cfg.action_mode)
         out = advance(self.market, self.state, self.sim_cfg, self._row, dec,
                       a_raw, self.projector)
+        reward = float(out.reward)
 
         self._row += 1
         self._steps += 1
         if self.cfg.strict:
             self._check(out, dec, before)
 
-        truncated = self._steps >= self.episode.length or self._row >= len(
-            self.market.sessions) - 1
+        def ended() -> bool:
+            return self._steps >= self.episode.length or self._row >= len(
+                self.market.sessions) - 1
+
+        truncated = ended()
         # There is no `terminated` condition at all -- notably not a drawdown breach.
         terminated = False
 
         next_dec = observe(self.market, self.state, self.sim_cfg, self._row, envelope=None)
+        # Event-driven: hold through every session that is not a decision point, and
+        # return the reward of the whole interval -- the holding-period reward of this
+        # decision (redesign 5c). Sessions held through are not training samples.
+        held = 0
+        while not truncated and not self._clock.due(next_dec.ctx):
+            before_h = self.state.ledger.share_vector(self.market.universe)
+            h = hold(self.market, self.state, self.sim_cfg, self._row, next_dec)
+            reward += float(h.reward)
+            self._row += 1
+            self._steps += 1
+            held += 1
+            if self.cfg.strict:
+                self._check(h, next_dec, before_h)
+            truncated = ended()
+            next_dec = observe(self.market, self.state, self.sim_cfg, self._row,
+                               envelope=None)
         obs = self._observe(next_dec)
         info = {
             **self._info_from(next_dec),
@@ -285,6 +319,7 @@ class ETFAllocationEnv(gym.Env):
             "safety_intervened": out.row["safety_intervened"],
             "capital_preservation": out.row["capital_preservation"],
             "infeasible_fallback": out.row["infeasible_fallback"],
+            "no_risk_increase": out.row["no_risk_increase"],
             "de_risk_alpha": out.row["de_risk_alpha"],
             "turnover": out.row["turnover"],
             "executed_weights": out.projected.astype(np.float32),
@@ -292,10 +327,11 @@ class ETFAllocationEnv(gym.Env):
             "lock_violations": out.lock_violations,
             "n_param": self.episode.hold_days,
             "dmax_param": self.episode.max_drawdown,
+            "sessions_in_step": 1 + held,
         }
         if truncated:
             info["episode_spec"] = self.episode.to_dict()
-        return obs, float(out.reward), terminated, truncated, info
+        return obs, reward, terminated, truncated, info
 
     # ------------------------------------------------------------------ internals
 
@@ -347,6 +383,44 @@ class ETFAllocationEnv(gym.Env):
                 self.violations.append(f"I5 inception: {ticker} held pre-inception")
         if self.violations:
             raise InvariantViolation("; ".join(self.violations[:5]))
+
+
+def target_weights(action, ctx, action_mode: str = "full") -> np.ndarray:
+    """The policy's action -> the raw target the projection receives.
+
+    `full` is the original: the action is the whole portfolio. `free_capital` allocates
+    only the capital the lock leaves free. A locked position's current weight IS its floor
+    at the decision close, so it is kept; the softmax spreads the rest over cash and every
+    ETF. Weight on a locked ETF is a purchase on top of its floor, which relocks it -- the
+    lock rule exactly (MODEL_REDESIGN_PLAN.md section 3).
+    """
+    s = softmax_weights(action)
+    if action_mode == "full":
+        return s
+    if action_mode != "free_capital":
+        raise ValueError(f"unknown action_mode {action_mode!r}")
+    return onto_free_capital(s, ctx)
+
+
+def onto_free_capital(s: np.ndarray, ctx) -> np.ndarray:
+    """Spread a simplex point `s` over the capital the lock leaves free.
+
+    Locked positions keep their current weight, which is their floor at the decision
+    close. ETFs that do not exist yet get nothing and the rest keeps its proportions, so
+    the target is feasible under availability too, not just the lock. Shared by training
+    (`target_weights`) and evaluation (`PolicyWeightSource`).
+    """
+    s = np.asarray(s, dtype=float).copy()
+    available = getattr(ctx, "available", None)
+    if available is not None:
+        s[1:] = np.where(np.asarray(available, dtype=bool), s[1:], 0.0)
+        total = float(s.sum())
+        s = s / total if total > 0 else np.eye(len(s))[0]
+    cur = np.asarray(ctx.current_weights, dtype=float)
+    locked = np.asarray(ctx.lock_remaining_days, dtype=float) > 0
+    floor = np.zeros_like(s)
+    floor[1:] = np.where(locked, np.maximum(cur[1:], 0.0), 0.0)
+    return floor + max(0.0, 1.0 - float(floor.sum())) * s
 
 
 def softmax_weights(action, scale: float = LOGIT_SCALE) -> np.ndarray:

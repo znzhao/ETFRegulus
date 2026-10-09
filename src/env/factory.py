@@ -96,6 +96,8 @@ def env_config_from(resolved: dict, constraints) -> EnvConfig:
         strict=bool(env.get("strict", True)),
         fixed_hold_days=env.get("fixed_hold_days"),
         fixed_max_drawdown=env.get("fixed_max_drawdown"),
+        decision_cadence=int(env.get("decision_cadence", 0)),
+        action_mode=str(env.get("action_mode", "full")),
     )
 
 
