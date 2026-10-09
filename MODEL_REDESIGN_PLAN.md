@@ -1,6 +1,6 @@
 # Model Redesign Plan — making the agent's decisions count
 
-**Status: Phase 1 COMPLETE (2026-10-09): `seeds_v1` trained to 32%, ensemble test Sharpe 0.24 -> 0.85, seed noise floor measured; see STATUS.md.**
+**Status: Phases 1-3 COMPLETE (2026-10-09). Phase 2 built (opt-in configs); Phase 3 results and the decisions they raise are in sections 12-13.**
 Phases 2–5 are planned, not built. Written 2026-10-07.
 Related: [INCREMENTAL_TRAINING_PLAN.md](INCREMENTAL_TRAINING_PLAN.md) (the `budget_v1` campaign this
 plan responds to), [CONTINUAL_TRAINING_PLAN.md](CONTINUAL_TRAINING_PLAN.md) (data versioning and
@@ -286,3 +286,121 @@ No transaction-cost or turnover terms (D-B).
 | 6 | Phase 5: reward variants | Small |
 
 Each step is decided and started separately; this document does not authorize any of them.
+
+---
+
+## 12. Phase 2 build and Phase 3 results (2026-10-09)
+
+### What was built (Phase 2)
+
+All opt-in; the defaults reproduce the original environment exactly (config hash `a207776c`
+unchanged, 468 tests pass). Committed as `f7a6c84` on `main`.
+
+| Piece | Switch | Notes |
+|---|---|---|
+| Over-budget rule D-F | `projection.over_budget_rule: no_risk_increase` | Reference = the current holdings (decided 2026-10-09). Hedges execute as proposed; riskier proposals are scaled back toward the holdings; share counts stay capped for every asset the decision did not deliberately raise (no drift-buying). Also replaces the capital-preservation weight caps. The replay detector and the cvxpy oracle both cover it |
+| Event-driven decisions | `environment.decision_cadence: 5` | Decide weekly and at once on an unlock or a capital-preservation flip; a true no-trade hold step in between; the reward of a decision is the log return until the next one. One `DecisionClock` shared by training and evaluation |
+| Free-capital actions | `environment.action_mode: free_capital` | The action allocates only the capital the lock leaves free; weight on a locked ETF is a purchase that relocks it. Feasible under lock and availability by construction |
+| Configs | `config/experiments/redesign_df.yaml`, `redesign_event.yaml` | The event config sets `gamma = 0.995` per decision (~0.999 per session); not yet tuned on validation (5e) |
+
+Strict-mode check over 5,040 sessions with random actions, risk on: zero invariant violations in
+every configuration. Discarded proposals: 40% (old) → 0% (D-F); with the full Phase 2
+environment, 62% of decisions execute exactly as proposed and the rest are only scaled back by
+the risk rule.
+
+### Phase 3: three campaigns, same setting (high_entropy), same seeds (1001–1003)
+
+| Campaign | Config | What differs |
+|---|---|---|
+| `seeds_v1` | `config/evaluation.yaml` | the old environment (control) |
+| `seeds_df` | `redesign_df.yaml` | D-F risk rule only |
+| `seeds_event` | `redesign_event.yaml` | D-F + event-driven decisions + free-capital actions |
+
+Sharpe averaged over D_max 5/10/15%, 2012–2025 test years and 2011–2024 validation years:
+
+| Budget | Old: val / test (ensemble) | D-F only: val / test | Full Phase 2: val / test |
+|---|---|---|---|
+| 2% | 0.25 / 0.24 | 0.40 / 0.48 | **0.60** / 0.45 |
+| 4% | 0.32 / 0.34 | 0.43 / 0.42 | **0.59** / 0.36 |
+| 8% | 0.30 / 0.42 | 0.61 / **0.61** | **0.69** / 0.47 |
+| 16% | 0.36 / 0.59 | (running) | — |
+| 32% | 0.44 / 0.85 | — | — |
+
+A full-Phase-2 step spans ~4.5 sessions, so at equal budget it has seen ~4.5× the market days;
+on equal market experience its 8% compares with the old environment's 32% (validation 0.69 vs 0.44,
+test 0.47 vs 0.85).
+
+Full Stages 9–12 at 8%:
+
+| | D-F only (`seeds_df_C2_full`) | Full Phase 2 (`seeds_event_C2_full`) |
+|---|---|---|
+| Acceptance | 19/28, no blocking failures | 17/28, **blocking: D_max monotonicity** (N=30: 35.8% at 10% vs 33.4% at 15%) |
+| Sharpe (5% ceiling, test) | 0.73 | 0.50 |
+| Hard engineering | all zero | all zero |
+| Safety intervention | 51% of steps | 11% of steps |
+
+### Findings
+
+1. **D-F is a clear improvement in learning.** At equal budget it doubles validation Sharpe
+   (8%: 0.30 → 0.61) and raises test (0.42 → 0.61), with tighter agreement between seeds and no
+   discarded proposals.
+2. **Event-driven decisions + free-capital actions are not yet a clear improvement on top of
+   D-F.** Best validation at every checkpoint (0.60–0.69), but lower test than D-F alone at 4%
+   and 8%. Unresolved at this budget; `gamma` and `target_kl` are still untuned for the new step
+   length (5e).
+3. **D-F weakens realized-drawdown control at the looser ceilings.** On Stage 9's continuous
+   2012–2026 path (N=30), realized maximum drawdown at D_max 10% / 15% is 18% / 19% under the old
+   rule, but 25% / 34% under D-F alone and 10% / 33% with full Phase 2. Every breach is still
+   market-forced (zero preventable violations): the rule never adds risk over budget, but with
+   current holdings as the reference it also never requires shedding risk, so a policy can ride
+   an unlocked risky position through a long decline. This is a property of the reference point
+   chosen for D-F, and needs a decision (§13).
+4. **D-F also lifts the constrained baselines.** Under the same rule, `spy_tlt_60_40_constrained`
+   reaches Sharpe 1.14 (from 0.88) and becomes the best strategy in the report; the policies
+   (0.73 D-F only, 0.50 full Phase 2, at 8%) trail most baselines. Comparisons against the
+   unconstrained benchmarks are unaffected (60/40 0.90, SPY 0.89).
+
+## 13. Decisions after Phase 3 (2026-10-09)
+
+| # | Question | Decision |
+|---|---|---|
+| O-2 | D-F lets a policy hold risk far over budget (finding 3). Tighten it? | **Decided (user): once the drawdown is past the ceiling, risk must be reduced step by step.** Specified in §14 step 1 |
+| O-3 | Keep event-driven decisions + free-capital actions? | **Decided (delegated to Claude): the main line continues with D-F (plus O-2) on daily decisions and full-portfolio actions.** It had the better test result at 8% (0.61 vs 0.47) and passed the monotonicity gate, which full Phase 2 failed. The event-driven environment stays available as an option and is revisited once `gamma` and `target_kl` have been set on validation years for its longer step (5e), as a side comparison when compute allows |
+| O-4 | The policy trails constrained 60/40 (1.14) under the new rule. | Phase 4 (momentum imitation, then free RL) is the planned lever, built on the main-line environment |
+
+## 14. Next steps when work resumes
+
+Status at the pause (2026-10-09 ~16:00): Phases 1–3 complete; Phase 2 code on `main` (`f7a6c84`).
+`seeds_df` was continued toward 16% that evening (see STATUS.md for its result). Nothing below is
+built yet.
+
+1. **O-2: stepwise de-risking past the ceiling.** Change the D-F rule in
+   `src/constraints/projector.py` (`AnalyticProjector._no_risk_increase`, mirrored by the cvxpy
+   oracle):
+   - **Over budget but still within the ceiling** (`stress(w_safe) > budget`, drawdown <= D_max):
+     unchanged -- no action may be riskier than the current holdings; hedges go through.
+   - **Past the ceiling** (capital preservation, drawdown > D_max): every decision must REDUCE
+     stressed loss by a fixed fraction. The bound becomes
+     `max(budget, stress(w_safe), (1 - k) * stress(current holdings))`, with `k` a new setting
+     `projection.derisk_step` (start at 0.2 per decision; the floor `stress(w_safe)` is the most
+     that can be shed, since locked positions cannot be sold). A proposal already below the
+     bound executes as proposed (the agent may de-risk faster, or hedge); otherwise it is scaled
+     toward the reference until it meets the bound. If even full scaling to the reference does
+     not meet it, the target moves along the segment from the holdings toward `w_safe` instead
+     (selling unlocked risk), so the reduction is always achievable.
+   - Tests: past the ceiling, every executed action's stressed loss is <= (1 - k) times the
+     holdings' (or the `w_safe` floor); within the ceiling, behaviour is unchanged; the replay
+     detector accepts the forced sales; the cvxpy oracle agrees.
+   - Check before retraining: re-run Stage 9 on the existing `seeds_df` models under the new
+     rule, to see the realized-drawdown depth at D_max 10%/15% come back toward the old ~19%.
+   - Then a new campaign (`seeds_df2`: high_entropy x 3 seeds, the D-F + O-2 config) to 8%, and
+     to 16% if time allows, compared with `seeds_v1` and `seeds_df`.
+2. **Phase 4: momentum.** Imitation pre-training on constrained momentum (training years only),
+   then free RL, on the main-line environment (§7). Report the similarity to momentum at every
+   checkpoint. The bar to beat is constrained 60/40 under the same rule (Sharpe 1.14).
+3. **Event-driven side comparison** (O-3), when compute allows: set `gamma` and `target_kl` on
+   validation years for `redesign_event.yaml`, then retrain and compare at equal budget.
+4. **Rules carried forward:** decisions on validation years, never test; three seeds per
+   configuration; full Stages 9–12 on the final checkpoint of each campaign; **no source-code
+   edits while a training session is running** (a session that lazily imports newer code crashes
+   at its next evaluation -- it happened on 2026-10-09).
