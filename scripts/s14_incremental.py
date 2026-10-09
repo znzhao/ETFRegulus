@@ -6,6 +6,7 @@
     python -m scripts.s14_incremental --hours 2         # a session: train / evaluate until the deadline
     python -m scripts.s14_incremental --stop            # ask a running session to stop after its rollout
     python -m scripts.s14_incremental --add-checkpoint 12   # insert a checkpoint at 12% of the budget
+    python -m scripts.s14_incremental --campaign seeds_v1 --init-fresh --setting high_entropy --seeds 3
 
 A session does, in a loop and until its deadline: evaluate any checkpoint every candidate
 has reached (walk-forward validation + selection + test, then the Stage 12 report, then
@@ -214,6 +215,72 @@ def init(args, resolved: dict, chash: str, log: Log) -> None:
         f"Schedule (rollouts): {[c['rollouts'] for c in schedule]}")
 
 
+def init_fresh(args, resolved: dict, chash: str, log: Log) -> None:
+    """A seed-ensemble campaign: ONE hyperparameter setting, several seeds, from scratch.
+
+    Redesign plan Phase 1 (decision D-C): per-year selection between four settings mostly
+    selected noise, and pooled validation showed the settings themselves behave very
+    differently with budget. So the setting is fixed once, and the compute goes into seeds,
+    which measure the noise and are averaged into one portfolio.
+    """
+    from src.agents.normalization import wrap_normalizer
+    from src.env.factory import make_vec_env
+    from src.training.curriculum import STAGES_BY_INDEX
+    from src.training.model_selection import default_candidates
+    from src.training.trainer import build_model, ppo_kwargs, stage_env_config
+
+    cdir = campaign_dir(args.campaign)
+    if (cdir / "campaign.json").exists():
+        raise CampaignError(f"campaign {args.campaign!r} already exists at {cdir}")
+    settings = {c.name: c.params for c in default_candidates(6)}
+    if args.setting not in settings:
+        raise CampaignError(f"unknown setting {args.setting!r}; one of {sorted(settings)}")
+    hp = {k: v for k, v in settings[args.setting].items() if k != "seed"}
+    s = _settings(resolved)
+    rollout_size = s["n_steps"] * s["n_envs"]
+    seeds = [args.seed_base + i for i in range(args.seeds)]
+
+    campaign = {
+        "campaign": args.campaign, "created_at": utc_now(), "mode": "ensemble",
+        "source_run": None, "setting": {"name": args.setting, **hp}, "seeds": seeds,
+        "config_path": str(args.config).replace("\\", "/"), "config_hash": chash,
+        "rollout_size": rollout_size, "n_envs": s["n_envs"],
+        "total_timesteps": s["total_timesteps"],
+        "first_year": s["first_year"], "last_year": s["last_year"],
+        "schedule": checkpoint_schedule(s["total_timesteps"], rollout_size),
+        "checkpoints": {}, "candidates": {}, "throughput": {}, "sessions": [],
+    }
+    stage_resolved = dict(resolved)
+    stage_resolved["ppo"] = {**(resolved.get("ppo", {}) or {}), **hp}
+    folds = select_folds(load_folds(), first_year=s["first_year"], last_year=s["last_year"])
+    for fold in folds:
+        bundle = _bundle(Path(args.config), resolved, fold)
+        env_cfg = stage_env_config(bundle, STAGES_BY_INDEX[5],
+                                   {"window": (fold.train_start, fold.train_end)})
+        # In-process environments: they only supply the spaces to build the model; no
+        # step is taken here, so the subprocess start-up cost would buy nothing.
+        venv = make_vec_env(bundle, s["n_envs"], base_seed=0, subproc=False, env_cfg=env_cfg)
+        try:
+            for seed in seeds:
+                vec = wrap_normalizer(venv, gamma=ppo_kwargs(stage_resolved)["gamma"])
+                model = build_model(bundle, vec, stage_resolved, seed=seed, tensorboard=None)
+                key = f"{fold.test_year}/seed{seed}"
+                write_state(model, vec, model_dir(cdir, key) / "current")
+                campaign["candidates"][key] = {
+                    "fold_id": fold.fold_id, "test_year": fold.test_year,
+                    "name": f"seed{seed}", "learning_rate": hp["learning_rate"],
+                    "ent_coef": hp["ent_coef"], "seed": seed, "rollouts": 0,
+                    "n_updates": 0, "last_diag": {}, "snapshots": {}}
+        finally:
+            venv.close()
+        log(f"  fold {fold.test_year}: {len(seeds)} fresh models ({args.setting})")
+    cdir.mkdir(parents=True, exist_ok=True)
+    save_campaign(cdir, campaign)
+    log(f"campaign {args.campaign!r} created: setting {args.setting} {hp}, seeds {seeds}, "
+        f"{len(campaign['candidates'])} models at 0 rollouts. Schedule (rollouts): "
+        f"{[c['rollouts'] for c in campaign['schedule']]}")
+
+
 # ------------------------------------------------------------------- session
 
 
@@ -343,6 +410,92 @@ def _training_summary(camp: dict, label: str, previous: str | None, prev_rollout
             "cash_weight": mean([d.get("cash_weight") for d in diags])}
 
 
+#: The three ceilings every seed is scored at (redesign plan, Phase 1 item 3).
+SEED_CEILINGS = (0.05, 0.10, 0.15)
+
+
+def _evaluate_fold_ensemble(sess: Session, fold, bundle, cells, label: str, fdir: Path,
+                            hd: int, dm: float) -> None:
+    """One fold of a seed-ensemble campaign: no selection.
+
+    Every seed is scored on validation and test at the three ceilings, and kept on disk so
+    the learning curve can report the spread between seeds. The REPORTED policy is the
+    ensemble -- the average of the seeds' portfolios -- which gets the full Stage 8 grid,
+    so the Stage 12 report and the hard-acceptance checks read it exactly as they would a
+    selected model.
+    """
+    from src.evaluation.fold_eval import cell_key, evaluate_window
+    from src.evaluation.rollout import load_policy
+    from src.evaluation.violations import summarize as summarize_violations
+
+    camp, log = sess.campaign, sess.log
+    primary = cell_key(hd, dm)
+    seed_cells = [(hd, d) for d in SEED_CEILINGS]
+    keys = _fold_keys(camp, fold.test_year)
+    dirs = [model_dir(sess.cdir, k) / label for k in keys]
+    fdir.mkdir(parents=True, exist_ok=True)
+
+    seeds, members = {}, []
+    for key, pdir in zip(keys, dirs):
+        c = camp["candidates"][key]
+        model = load_policy(pdir)
+        members.append(model)
+        val, val_trajs = evaluate_window(model, bundle, (fold.val_start, fold.val_end),
+                                         seed_cells, seed=EVAL_SEED,
+                                         label=f"val {c['name']}", log=log)
+        test, test_trajs = evaluate_window(model, bundle, (fold.test_start, fold.test_end),
+                                           seed_cells, seed=EVAL_SEED,
+                                           label=f"test {c['name']}", log=log)
+        sdir = fdir / "seeds" / c["name"]
+        sdir.mkdir(parents=True, exist_ok=True)
+        for k, t in val_trajs.items():
+            t.to_parquet(sdir / f"val_{k}.parquet")
+        for k, t in test_trajs.items():
+            t.to_parquet(sdir / f"test_{k}.parquet")
+        seeds[c["name"]] = {"params": {"ent_coef": c["ent_coef"],
+                                       "learning_rate": c["learning_rate"],
+                                       "seed": c["seed"], "policy_dir": str(pdir)},
+                            "validation": val, "test": test}
+
+    ens_val, ens_val_trajs = evaluate_window(members, bundle, (fold.val_start, fold.val_end),
+                                             seed_cells, seed=EVAL_SEED,
+                                             label="val ENSEMBLE", log=log)
+    ens_val_trajs[primary].to_parquet(fdir / "val_trajectory.parquet")
+    (fdir / "val_cells").mkdir(exist_ok=True)
+    for key, traj in ens_val_trajs.items():
+        traj.to_parquet(fdir / "val_cells" / f"{key}.parquet")
+    test_agg, trajs = evaluate_window(members, bundle, (fold.test_start, fold.test_end),
+                                      cells, seed=EVAL_SEED,
+                                      label=f"TEST {fold.test_year} ENSEMBLE", log=log)
+    trajs[primary].to_parquet(fdir / "trajectory.parquet")
+    (fdir / "cells").mkdir(exist_ok=True)
+    for key, traj in trajs.items():
+        traj.to_parquet(fdir / "cells" / f"{key}.parquet")
+    taxonomy = summarize_violations(trajs[primary], bundle.market.universe,
+                                    d_max=dm, market=bundle.market)
+    (fdir / "violations.json").write_text(json.dumps(taxonomy, indent=2, default=str),
+                                          encoding="utf-8")
+    criterion = "seed ensemble: the average of every seed's portfolio, no selection"
+    # selection.json keeps the Stage 8 shape so every reader of it still works: the
+    # "candidates" are the seeds, the "chosen" one is the ensemble.
+    (fdir / "selection.json").write_text(json.dumps({
+        "fold_id": fold.fold_id, "chosen": "ensemble", "criterion": criterion,
+        "constraint_validation_failure": False,
+        "candidates": [{"name": n, "params": s["params"], "validation": s["validation"],
+                        "eliminated_at": None, "reason": "ensemble member"}
+                       for n, s in seeds.items()]}, indent=2, default=str), encoding="utf-8")
+    record = {
+        "fold_id": fold.fold_id, "test_year": fold.test_year, "fold": fold.to_dict(),
+        "selected": "ensemble", "criterion": criterion,
+        "constraint_validation_failure": False,
+        "validation": ens_val, "test": test_agg,
+        "violations": {k: v for k, v in taxonomy.items() if k != "replay_findings"},
+        "seeds": {n: {"validation": s["validation"], "test": s["test"]} for n, s in seeds.items()},
+    }
+    (fdir / "record.json").write_text(json.dumps(record, indent=2, default=str),
+                                      encoding="utf-8")
+
+
 def evaluate_checkpoint(sess: Session, cp: dict, folds, config_path, resolved,
                         replicates: int) -> bool:
     """Stage 8's per-fold protocol on the frozen checkpoint models, then the reports."""
@@ -374,6 +527,14 @@ def evaluate_checkpoint(sess: Session, cp: dict, folds, config_path, resolved,
         dm = bundle.constraints.drawdown.max_drawdown.primary
         primary = cell_key(hd, dm)
         log(f"  fold {fold.test_year}: val {fold.val_start[:4]}, test {fold.test_year}")
+
+        if camp.get("mode") == "ensemble":
+            _evaluate_fold_ensemble(sess, fold, bundle, cells, label, fdir, hd, dm)
+            (fdir / COMPLETE).write_text(label, encoding="utf-8")
+            state.setdefault("folds_done", []).append(fold.test_year)
+            sess.measure("seconds_per_fold_eval", time.time() - t0)
+            sess.save()
+            continue
 
         candidates, val_paths = [], {}
         for key in _fold_keys(camp, fold.test_year):
@@ -429,8 +590,14 @@ def evaluate_checkpoint(sess: Session, cp: dict, folds, config_path, resolved,
     t0 = time.time()
     records = [json.loads((ckdir / "folds" / str(f.test_year) / "record.json")
                           .read_text(encoding="utf-8")) for f in folds]
-    lock = sum(r["test"]["lock_violations"] for r in records)
-    feas = sum(r["test"]["feasibility_violations"] for r in records)
+    # In an ensemble campaign every seed's own runs count too: a lock or feasibility
+    # violation anywhere is a simulator defect, whichever policy produced it.
+    lock = sum(r["test"]["lock_violations"]
+               + sum(s["test"]["lock_violations"] for s in r.get("seeds", {}).values())
+               for r in records)
+    feas = sum(r["test"]["feasibility_violations"]
+               + sum(s["test"]["feasibility_violations"] for s in r.get("seeds", {}).values())
+               for r in records)
     prev = sum(r["test"]["preventable_violations"] for r in records)
     hard = {"lock_violations": lock, "feasibility_violations": feas,
             "preventable_dmax_violations": prev,
@@ -634,6 +801,9 @@ def main(argv=None) -> int:
     mode.add_argument("--hours", type=float, help="run a session of this many hours")
     mode.add_argument("--stop", action="store_true",
                       help="ask a running session to stop after its current rollout")
+    mode.add_argument("--init-fresh", action="store_true",
+                      help="create a seed-ensemble campaign: one --setting, --seeds models per "
+                           "fold, trained from scratch, no per-year selection")
     mode.add_argument("--add-checkpoint", type=float, metavar="PCT",
                       help="insert a checkpoint at PCT%% of the budget; candidates already "
                            "past it are rolled back to their previous snapshot")
@@ -642,6 +812,11 @@ def main(argv=None) -> int:
     p.add_argument("--replicates", type=int, default=1000,
                    help="bootstrap replicates for the learning-curve bands and verdicts")
     p.add_argument("--allow-config-change", action="store_true")
+    p.add_argument("--setting", default="high_entropy",
+                   help="--init-fresh: the hyperparameter setting (a model_selection name)")
+    p.add_argument("--seeds", type=int, default=3, help="--init-fresh: seeds per fold")
+    p.add_argument("--seed-base", type=int, default=1001,
+                   help="--init-fresh: first seed; the rest follow consecutively")
     args = p.parse_args(argv)
 
     try:
@@ -671,6 +846,9 @@ def main(argv=None) -> int:
         chash = config_hash(resolved)
         if args.init:
             init(args, resolved, chash, Log(None))
+            return 0
+        if args.init_fresh:
+            init_fresh(args, resolved, chash, Log(None))
             return 0
         if args.hours <= 0:
             raise CampaignError("--hours must be positive")

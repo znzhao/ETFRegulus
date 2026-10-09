@@ -103,7 +103,9 @@ def main(resolved: dict, ctx: StageContext) -> None:
     from src.env.factory import build_bundle
 
     args = ctx.args
-    policy_dir = Path(args.policy) if args.policy else newest_stage8_policy()
+    # Comma-separated paths are a seed ensemble: the average of their portfolios.
+    policy_dir = ([Path(p) for p in args.policy.split(",")] if args.policy and "," in args.policy
+                  else Path(args.policy) if args.policy else newest_stage8_policy())
     ctx.log(f"policy: {policy_dir}")
 
     # The last fold's scaler, which is the one this policy was trained under.

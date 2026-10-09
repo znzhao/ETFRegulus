@@ -109,6 +109,57 @@ def mean_candidate_val_sharpe(checkpoint_dir: Path, primary_cell: str) -> float:
     return float(np.mean(values)) if values else float("nan")
 
 
+#: The ceilings every checkpoint is also reported at (redesign plan, Phase 1 item 3): at 5%
+#: the risk layer decides most sessions, so 5% alone says little about the policy itself.
+REPORT_CEILINGS = (0.05, 0.1, 0.15)
+
+
+def _pooled_sharpe(paths: list[Path]) -> float | None:
+    if not paths:
+        return None
+    frames = [pd.read_parquet(p) for p in paths]
+    return float(metrics_from_returns(portfolio_returns(frames))["sharpe"])
+
+
+def _hold_days(primary_cell: str) -> int:
+    return int(primary_cell.split("_")[0][1:])
+
+
+def sharpe_by_ceiling(checkpoint_dir: Path, primary_cell: str,
+                      folder: str = "cells") -> dict[str, float | None]:
+    """Sharpe of the reported policy at each ceiling, pooled over every fold.
+
+    `cells` holds the test runs; `val_cells` the validation runs, which only an ensemble
+    campaign keeps at every ceiling.
+    """
+    hd = _hold_days(primary_cell)
+    return {f"{d:g}": _pooled_sharpe([f / folder / f"N{hd}_D{d}.parquet"
+                                      for f in fold_dirs(checkpoint_dir)
+                                      if (f / folder / f"N{hd}_D{d}.parquet").exists()])
+            for d in REPORT_CEILINGS}
+
+
+def seed_sharpes(checkpoint_dir: Path, primary_cell: str) -> dict[str, dict] | None:
+    """Per-seed Sharpe at each ceiling, validation and test, pooled over every fold.
+
+    Only an ensemble campaign keeps per-seed trajectories; for any other it returns None.
+    """
+    hd = _hold_days(primary_cell)
+    names = sorted({d.name for f in fold_dirs(checkpoint_dir)
+                    for d in (f / "seeds").glob("*") if d.is_dir()})
+    if not names:
+        return None
+    out = {}
+    for name in names:
+        out[name] = {
+            part: {f"{d:g}": _pooled_sharpe([f / "seeds" / name / f"{part}_N{hd}_D{d}.parquet"
+                                             for f in fold_dirs(checkpoint_dir)
+                                             if (f / "seeds" / name / f"{part}_N{hd}_D{d}.parquet").exists()])
+                   for d in REPORT_CEILINGS}
+            for part in ("val", "test")}
+    return out
+
+
 def baseline_sharpes(report_dir: Path) -> dict[str, float]:
     summary = pd.read_csv(report_dir / "summary.csv", index_col=0)
     return {str(k): float(v) for k, v in summary["Sharpe"].items()}
@@ -143,6 +194,9 @@ def build_record(*, label: str, pct: int, checkpoint_dir: Path, report_dir: Path
         "selections": selections(checkpoint_dir),
         "hard_acceptance": hard_acceptance,
         "training": training,
+        "test_by_ceiling": sharpe_by_ceiling(checkpoint_dir, primary_cell),
+        "val_by_ceiling": sharpe_by_ceiling(checkpoint_dir, primary_cell, "val_cells"),
+        "seeds": seed_sharpes(checkpoint_dir, primary_cell),
         "vs_previous": None,
     }
     if previous_dir is not None:
@@ -243,6 +297,51 @@ def render(records: list[dict], *, campaign: str, primary_cell: str = "N30_D0.05
             f"| {_f(t.get('infeasible_fallback'), '{:.1%}')} "
             f"| {_f(t.get('cash_weight'), '{:.1%}')} |")
     add("")
+
+    add("## By drawdown ceiling (test Sharpe of the reported policy, N fixed)")
+    add("")
+    add("At 5% the risk layer decides most sessions, so the looser ceilings show more of "
+        "the policy itself.")
+    add("")
+    add("| Checkpoint | " + " | ".join(f"{d:.0%}" for d in REPORT_CEILINGS) + " | Average |")
+    add("|---|" + "---|" * (len(REPORT_CEILINGS) + 1))
+    for r in records:
+        by = r.get("test_by_ceiling") or {}
+        vals = [by.get(f"{d:g}") for d in REPORT_CEILINGS]
+        known = [v for v in vals if v is not None]
+        add(f"| {r['label']} | " + " | ".join(_f(v) for v in vals)
+            + f" | {_f(float(np.mean(known)) if known else None)} |")
+    add("")
+
+    if any(r.get("seeds") for r in records):
+        add("## Seeds (Sharpe averaged over the three ceilings)")
+        add("")
+        add("Each seed is the same setting trained from a different random start. The spread "
+            "between them is the noise floor: a change between checkpoints smaller than it "
+            "is not evidence of anything. The ensemble is the reported policy.")
+        add("")
+        for part, title in (("val", "Validation"), ("test", "Test")):
+            names = sorted({n for r in records for n in (r.get("seeds") or {})})
+            add(f"**{title}**")
+            add("")
+            add("| Checkpoint | " + " | ".join(names) + " | Seed mean | Seed range | Ensemble |")
+            add("|---|" + "---|" * (len(names) + 3))
+            for r in records:
+                seeds = r.get("seeds") or {}
+
+                def avg(d):
+                    v = [x for x in d.values() if x is not None]
+                    return float(np.mean(v)) if v else None
+
+                per = [avg(seeds[n][part]) if n in seeds else None for n in names]
+                known = [v for v in per if v is not None]
+                ens = avg(r.get("test_by_ceiling" if part == "test" else "val_by_ceiling")
+                          or {})
+                add(f"| {r['label']} | " + " | ".join(_f(v) for v in per)
+                    + f" | {_f(float(np.mean(known)) if known else None)}"
+                    + f" | {(_f(min(known)) + '–' + _f(max(known))) if known else '--'}"
+                    + f" | {_f(ens)} |")
+            add("")
 
     add("## Selected candidate per test year")
     add("")

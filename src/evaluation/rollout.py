@@ -59,9 +59,21 @@ class PolicyWeightSource:
             self.spec, self.store, row, ctx,
             hold_days=self.hold_days, max_drawdown=self.max_drawdown,
             nav_at_reset=self._nav_at_reset, out=self._buffer)
-        action, _ = self.model.predict(obs, deterministic=self.deterministic)
         self.n_calls += 1
-        return softmax_weights(action)
+        return policy_weights(self.model, obs, deterministic=self.deterministic)
+
+
+def policy_weights(model, obs, *, deterministic: bool = True) -> np.ndarray:
+    """Portfolio weights from one policy, or the average from a list of them.
+
+    A seed ensemble is the mean of the members' PORTFOLIOS, not of their raw actions:
+    averaging actions (logits) would not give the average allocation.
+    """
+    if isinstance(model, (list, tuple)):
+        return np.mean([softmax_weights(m.predict(obs, deterministic=deterministic)[0])
+                        for m in model], axis=0)
+    action, _ = model.predict(obs, deterministic=deterministic)
+    return softmax_weights(action)
 
 
 def load_policy(directory: Path, *, device: str = "cpu"):
@@ -74,6 +86,8 @@ def load_policy(directory: Path, *, device: str = "cpu"):
     """
     from stable_baselines3 import PPO
 
+    if isinstance(directory, (list, tuple)):
+        return [load_policy(d, device=device) for d in directory]
     path = Path(directory)
     if path.is_dir():
         path = path / "policy.zip"

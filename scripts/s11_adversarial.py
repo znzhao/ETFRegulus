@@ -117,7 +117,9 @@ def main(resolved: dict, ctx: StageContext) -> None:
     from src.sim.runner import weight_source
 
     args = ctx.args
-    policy_dir = Path(args.policy) if args.policy else _newest_policy()
+    # Comma-separated paths are a seed ensemble: the average of their portfolios.
+    policy_dir = ([Path(p) for p in args.policy.split(",")] if args.policy and "," in args.policy
+                  else Path(args.policy) if args.policy else _newest_policy())
     ctx.log(f"policy: {policy_dir}")
 
     bundle = build_bundle(ctx.config_path, resolved=resolved,

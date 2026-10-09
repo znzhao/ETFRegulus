@@ -304,6 +304,55 @@ def test_the_learning_curve_renders_every_checkpoint():
     assert "spy_tlt_60_40" in text
 
 
+# ------------------------------------------------------------- seed ensembles
+
+
+class _FixedPolicy:
+    def __init__(self, action):
+        self.action = np.asarray(action, dtype=np.float32)
+
+    def predict(self, obs, deterministic=True):
+        return self.action, None
+
+
+def test_an_ensemble_holds_the_average_of_its_members_portfolios():
+    """Averaging the PORTFOLIOS, not the raw actions: the mean of two logit vectors would
+    give a different (more concentrated) allocation than either member's average."""
+    from src.env.etf_env import softmax_weights
+    from src.evaluation.rollout import policy_weights
+
+    a, b = _FixedPolicy([1.0, -1.0, 0.0]), _FixedPolicy([-1.0, 1.0, 0.5])
+    w = policy_weights([a, b], obs=None)
+    expected = (softmax_weights(a.action) + softmax_weights(b.action)) / 2
+    assert np.allclose(w, expected)
+    assert w.sum() == pytest.approx(1.0)
+    assert not np.allclose(w, softmax_weights((a.action + b.action) / 2))
+    # A single model is unchanged.
+    assert np.allclose(policy_weights(a, obs=None), softmax_weights(a.action))
+
+
+def test_the_learning_curve_reports_seeds_and_ceilings():
+    from src.evaluation.learning_curve import render
+
+    row = {"label": "C0", "pct": 2, "test_sharpe": 0.7,
+           "test_sharpe_band": {"q05": 0.3, "q50": 0.7, "q95": 1.1},
+           "test_max_drawdown": 0.12, "val_sharpe_selected": 0.9,
+           "val_sharpe_all_candidates": 0.8, "baselines": {"spy_tlt_60_40": 0.90},
+           "best_unconstrained": ["spy_tlt_60_40", 0.90], "best_constrained": None,
+           "gap_to_best_unconstrained": -0.2, "gap_to_best_constrained": None,
+           "selections": {"2012": "ensemble"}, "hard_acceptance": {"passed": True},
+           "training": {}, "vs_previous": None,
+           "test_by_ceiling": {"0.05": 0.7, "0.1": 0.6, "0.15": 0.8},
+           "seeds": {"seed1001": {"val": {"0.05": 0.9, "0.1": 0.8, "0.15": 1.0},
+                                  "test": {"0.05": 0.6, "0.1": 0.5, "0.15": 0.7}},
+                     "seed1002": {"val": {"0.05": 0.7, "0.1": 0.6, "0.15": 0.8},
+                                  "test": {"0.05": 0.8, "0.1": 0.7, "0.15": 0.9}}}}
+    text = render([row], campaign="t")
+    assert "By drawdown ceiling" in text and "| C0 | 0.70 | 0.60 | 0.80 | 0.70 |" in text
+    assert "## Seeds" in text
+    assert "seed1001" in text and "0.60–0.80" in text          # test seed range
+
+
 # --------------------------------------------------- exact resume (the big one)
 
 
