@@ -1,6 +1,7 @@
 # Model Redesign Plan — making the agent's decisions count
 
-**Status: planned, not built.** Written 2026-10-07. Nothing here exists in code yet.
+**Status: Phase 1 built (2026-10-08); its campaign `seeds_v1` is created and not yet trained.**
+Phases 2–5 are planned, not built. Written 2026-10-07.
 Related: [INCREMENTAL_TRAINING_PLAN.md](INCREMENTAL_TRAINING_PLAN.md) (the `budget_v1` campaign this
 plan responds to), [CONTINUAL_TRAINING_PLAN.md](CONTINUAL_TRAINING_PLAN.md) (data versioning and
 fine-tuning, deferred), [STATUS.md](STATUS.md).
@@ -47,7 +48,7 @@ training budget or the network size.
 
 | # | Decision | Notes |
 |---|---|---|
-| D-A | **Stop adding budget to `budget_v1`.** | It stays saved at 37.84% as the record of the original design and the control group for the redesign |
+| D-A | **Stop adding budget to `budget_v1`.** Revised 2026-10-08: **keep adding budget to a FIXED setting** while its validation curve keeps rising. | `budget_v1` stays saved at 37.84% as the record of the original design. The original "budget does not help" reading was an artifact of per-year selection: pooled over all validation years, the lr 3e-4 settings improve with budget (high_entropy 0.81 → 0.95 validation Sharpe, 2% → 32%; test 0.41 → 0.72) while the lr 1e-4 settings decline. See STATUS.md, 2026-10-08 |
 | D-B | **No transaction costs, anywhere.** | Fills stay at the next session's open with `cost_bps = 0` (decision D10 stands). With a lock period, costs are negligible. Turnover penalties and cost models are out of scope and will not be proposed again |
 | D-C | **One hyperparameter setting plus three seeds, instead of four settings and one seed.** | Same training cost. Rationale in §4 |
 | D-D | **Momentum is used as a starting point, not as an anchor.** | The final policy must not be a lightly modified momentum strategy. Method in §7 |
@@ -81,6 +82,24 @@ Cash funds every purchase and receives every sale.
 ---
 
 ## 4. Phase 1 — Fix the measuring stick (no environment change)
+
+**Built 2026-10-08.** The setting is **`high_entropy`** (lr 3e-4, ent_coef 0.02), chosen on
+validation pooled over all 14 folds and every `budget_v1` checkpoint (0.85 average validation
+Sharpe at D_max 5/10/15%, the highest of the four, and rising with budget). The KL early-stop
+is left as configured: this setting improves with budget under it, and changing it would change
+the config. Campaign `seeds_v1`: 3 seeds (1001–1003) × 14 folds, trained from scratch on the
+standard checkpoint schedule, run with `scripts/s14_incremental.py`:
+
+- `--init-fresh --setting high_entropy --seeds 3` creates the campaign (mode `ensemble`).
+- At each checkpoint, every seed is scored on validation and test at D_max 5/10/15%; the
+  **reported policy is the ensemble** (the average of the three seeds' portfolios), evaluated on
+  the full Stage 8 grid, so Stage 12 and the hard-acceptance checks read it unchanged.
+- The learning curve adds a by-ceiling table and a per-seed table (each seed, seed mean, seed
+  range, ensemble), for validation and test. The seed range is the noise floor.
+- Per-year selection is gone, so per-fold two-year validation (item 2 below) is no longer
+  needed: the one remaining choice, the setting, was made on all validation years pooled.
+
+The items as originally planned:
 
 Without this, no later change can be judged: current checkpoint-to-checkpoint noise (±0.4 Sharpe)
 exceeds the improvement any single change is likely to deliver.
