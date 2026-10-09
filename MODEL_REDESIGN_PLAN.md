@@ -1,6 +1,6 @@
 # Model Redesign Plan — making the agent's decisions count
 
-**Status: Phase 1 built (2026-10-08); its campaign `seeds_v1` is created and not yet trained.**
+**Status: Phase 1 COMPLETE (2026-10-09): `seeds_v1` trained to 32%, ensemble test Sharpe 0.24 -> 0.85, seed noise floor measured; see STATUS.md.**
 Phases 2–5 are planned, not built. Written 2026-10-07.
 Related: [INCREMENTAL_TRAINING_PLAN.md](INCREMENTAL_TRAINING_PLAN.md) (the `budget_v1` campaign this
 plan responds to), [CONTINUAL_TRAINING_PLAN.md](CONTINUAL_TRAINING_PLAN.md) (data versioning and
