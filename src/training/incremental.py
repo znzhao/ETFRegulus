@@ -125,15 +125,20 @@ def saved_hparams(policy_zip: Path) -> dict:
 # ------------------------------------------------------------- atomic state dirs
 
 
-def _retry(fn, *args, attempts: int = 10, wait: float = 0.5):
-    """Windows can briefly lock a freshly written file (indexer, antivirus)."""
+def _retry(fn, *args, attempts: int = 30, wait: float = 0.5, max_wait: float = 5.0):
+    """Windows can briefly lock a freshly written file (indexer, antivirus).
+
+    Backs off for up to ~2 minutes in total. The first session of `seeds_v1` died after 11 hours on a
+    lock that outlasted the original 5-second window; the saved state survived intact
+    (`recover_state` handles exactly that point), but the session did not.
+    """
     for i in range(attempts):
         try:
             return fn(*args)
         except PermissionError:
             if i == attempts - 1:
                 raise
-            time.sleep(wait)
+            time.sleep(min(wait * (1.5 ** i), max_wait))
 
 
 def _complete(directory: Path) -> int | None:
