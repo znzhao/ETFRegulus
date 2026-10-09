@@ -230,6 +230,11 @@ class DrawdownSpec:
 class ProjectionSpec:
     backend: Literal["analytic", "cvxpy"] = "analytic"
     alpha_tolerance: float = 1e-3
+    #: What the risk layer does when even the safe portfolio breaches the drawdown budget
+    #: (and in capital preservation). `freeze`: execute the safe portfolio, the original
+    #: behaviour. `no_risk_increase`: redesign decision D-F -- execute any action no riskier
+    #: than keeping the current holdings; scale a riskier one back toward them.
+    over_budget_rule: Literal["freeze", "no_risk_increase"] = "freeze"
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,11 @@
+# Redesign Phase 2, step 1: the over-budget risk rule D-F alone (MODEL_REDESIGN_PLAN.md 5d).
+#
+# Everything else is config/evaluation.yaml unchanged, so a campaign on this config differs
+# from `seeds_v1` in exactly one respect: over budget, the risk layer allows any action no
+# riskier than the current holdings (hedges go through) instead of freezing into the safe
+# portfolio.
+extends:
+  - ../evaluation.yaml
+
+projection:
+  over_budget_rule: no_risk_increase

@@ -1,0 +1,21 @@
+# Redesign Phase 2, complete: D-F risk rule + event-driven decisions + free-capital actions
+# (MODEL_REDESIGN_PLAN.md section 5).
+#
+# On top of redesign_df.yaml (the risk rule alone), the agent now:
+#   * decides weekly (every 5 sessions) and at once when a held position unlocks or the
+#     capital-preservation state flips; it holds -- no trades -- in between, and the reward
+#     of a decision is the log return until the next one (5a, 5c);
+#   * allocates only the capital the lock leaves free; weight on a locked ETF is a purchase
+#     that relocks it (5b).
+extends:
+  - redesign_df.yaml
+
+environment:
+  decision_cadence: 5
+  action_mode: free_capital
+
+ppo:
+  # One step now spans ~5 sessions instead of 1. 0.999 per step would stretch the
+  # look-ahead ~5x in calendar time; 0.999^5 ~ 0.995 keeps it per session. Not tuned:
+  # the plan (5e) sets gamma on validation years, which is a separate step.
+  gamma: 0.995

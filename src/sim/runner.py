@@ -119,4 +119,5 @@ def make_weight_fn(resolved: dict, market: MarketData, *, strategy=None) -> tupl
 
 def make_projector_from(constraints: ConstraintsConfig):
     return make_projector(constraints.projection.backend,
-                          constraints.projection.alpha_tolerance)
+                          constraints.projection.alpha_tolerance,
+                          over_budget_rule=constraints.projection.over_budget_rule)

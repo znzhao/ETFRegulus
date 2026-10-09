@@ -103,7 +103,9 @@ def replay_feasibility(traj: pd.DataFrame, universe: list[str], *,
     2. availability -- no weight on an asset that did not exist yet;
     3. the lock floor -- a locked position's weight was not projected below what the lock
        required it to keep;
-    4. capital preservation -- while breached, share counts did not rise.
+    4. capital preservation -- while breached, share counts did not rise; under the
+       `no_risk_increase` rule (D-F), only an asset whose projected weight the decision
+       deliberately raised may grow.
 
     Any excursion is a preventable violation *by definition*: the projection is the thing
     that was supposed to prevent it.
@@ -122,6 +124,8 @@ def replay_feasibility(traj: pd.DataFrame, universe: list[str], *,
     share_cols = [f"shares_{t}" for t in universe]
     locked_cols = [f"locked_{t}" for t in universe]
     prev_shares = None
+    prev_weights = None
+    weight_cols = [f"w_{t}" for t in universe]
 
     # Per-session dividend and close, so accretion can be removed exactly.
     div_of: dict = {}
@@ -172,9 +176,15 @@ def replay_feasibility(traj: pd.DataFrame, universe: list[str], *,
                     float(prev_shares[j] - executed[j])))
 
             # 4. capital preservation caps SHARE COUNTS, not weights.
-            if bool(row.get("capital_preservation", False)):
+            d_f = bool(row.get("no_risk_increase", False))
+            if bool(row.get("capital_preservation", False)) or d_f:
                 # Net of accretion: the cap constrains buying, not corporate actions.
                 grew = executed > prev_shares * (1.0 + 1e-9) + 1e-6
+                if d_f and prev_weights is not None:
+                    # D-F: a deliberate increase (projected weight above the decision-time
+                    # weight) is legal -- the risk rule approved it. Anything else is not.
+                    raised = w[1:] > prev_weights + 1e-9
+                    grew = grew & ~raised
                 for j in np.flatnonzero(grew):
                     findings.append(ReplayFinding(
                         stamp, "preservation_cap_breached",
@@ -183,6 +193,7 @@ def replay_feasibility(traj: pd.DataFrame, universe: list[str], *,
                         "(net of reinvested distributions)",
                         float(executed[j] - prev_shares[j])))
         prev_shares = shares
+        prev_weights = np.array([float(row.get(c, 0.0)) for c in weight_cols])
     return findings
 
 

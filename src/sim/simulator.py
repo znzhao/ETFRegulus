@@ -31,8 +31,9 @@ from src.constraints.risk_envelope import RiskEnvelope
 from src.portfolio.ledger import Ledger
 from src.portfolio.lock_manager import LockManager
 
-#: Signature of a weight source: (session, context) -> raw weights over [CASH, *universe].
-WeightFn = Callable[[pd.Timestamp, "StepContext"], np.ndarray]
+#: Signature of a weight source: (session, context) -> raw weights over [CASH, *universe],
+#: or None to HOLD the book without deciding (an event-driven agent between decisions).
+WeightFn = Callable[[pd.Timestamp, "StepContext"], "np.ndarray | None"]
 
 
 @dataclass
@@ -174,7 +175,7 @@ def simulate(
     Gymnasium environment, so a baseline and a policy cannot be run on different
     machinery. Imported inside the function because `engine` imports this module.
     """
-    from src.sim.engine import advance, initial_state, observe, reservoir_entry
+    from src.sim.engine import advance, hold, initial_state, observe, reservoir_entry
 
     projector = projector or AnalyticProjector()
     T = len(market.sessions)
@@ -205,7 +206,12 @@ def simulate(
         if cfg.reservoir_every and i % cfg.reservoir_every == 0 and i > 0:
             reservoir.append(reservoir_entry(market, st, cfg, i, dec))
 
-        a_raw = np.asarray(weight_fn(market.sessions[i], dec.ctx), dtype=float)
+        proposal = weight_fn(market.sessions[i], dec.ctx)
+        if proposal is None:
+            out = hold(market, st, cfg, i, dec)
+            rows.append(out.row)
+            continue
+        a_raw = np.asarray(proposal, dtype=float)
         try:
             out = advance(market, st, cfg, i, dec, a_raw, projector)
         except Exception:
