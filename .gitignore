@@ -227,3 +227,6 @@ __marimo__/
 # layer and its tests -- from version control.
 /data/
 /artifacts/
+
+# Web app fake data (regenerate with scripts.fake_site_data)
+webapp/fake_data*/

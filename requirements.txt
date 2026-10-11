@@ -30,6 +30,9 @@ exchange-calendars==4.13.2
 PyYAML==6.0.3
 python-dotenv==1.2.3
 
+# --- Web app data contract (WEBAPP_PLAN.md) -----------------------------------
+jsonschema==4.23.0
+
 # --- Testing (D8) ----------------------------------------------------------
 pytest==9.1.1
 hypothesis==6.167.1
