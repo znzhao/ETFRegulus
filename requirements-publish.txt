@@ -1,0 +1,11 @@
+# Minimal dependencies for the web app's daily data job (WEBAPP_PLAN.md): Stages 1-2 (prices
+# only, no FRED) and Stage 15. Pins match requirements.txt; no torch, RL or plotting stack.
+numpy==2.4.6
+pandas==3.0.5
+scipy==1.17.1
+pyarrow==25.0.1
+yfinance==1.7.0
+exchange-calendars==4.13.2
+PyYAML==6.0.3
+python-dotenv==1.2.3
+jsonschema==4.23.0

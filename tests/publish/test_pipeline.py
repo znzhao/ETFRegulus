@@ -74,3 +74,27 @@ def test_cli_writes_a_valid_site_and_keeps_the_old_one_on_failure(tmp_path, monk
     monkeypatch.setattr(s15_publish.contract, "validate_site", lambda d: ["forced failure"])
     assert s15_publish.main(args) == 1
     assert (out / "manifest.json").read_text(encoding="utf-8") == before
+
+
+def test_live_log_appends_each_session_once(tmp_path):
+    out, log = tmp_path / "site", tmp_path / "log"
+    args = ["--out", str(out), "--start", START, "--end", END, "--only", "spy_tlt_60_40",
+            "--ceilings", "5", "--log-dir", str(log)]
+    assert s15_publish.main(args) == 0
+    assert s15_publish.main(args) == 0          # same data date: nothing new to append
+    files = list(log.glob("*.jsonl"))
+    assert [f.name for f in files] == ["2021-12.jsonl"]
+    assert len(files[0].read_text(encoding="utf-8").splitlines()) == 1
+    import json
+    doc = json.loads((out / "live" / "index.json").read_text(encoding="utf-8"))
+    assert doc["launch_date"] == "2021-12-31"
+    assert [e["date"] for e in doc["portfolios"]["spy_tlt_60_40_D5"]] == ["2021-12-31"]
+    assert contract.validate_site(out) == []
+
+
+def test_live_log_never_appends_an_older_session():
+    from src.publish import live
+    lines = [{"date": "2026-10-09", "portfolios": {}}]
+    assert not live.is_new(lines, {"date": "2026-10-08", "portfolios": {}})
+    assert not live.is_new(lines, {"date": "2026-10-09", "portfolios": {}})
+    assert live.is_new(lines, {"date": "2026-10-12", "portfolios": {}})
