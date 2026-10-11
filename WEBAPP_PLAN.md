@@ -91,27 +91,37 @@ Navigation: a bottom tab bar on phones and a top bar on desktop. The layout is p
 
 ## 3. Data contract (site JSON)
 
-The front end reads only these files. A JSON Schema for each lives in `schema/` in the site
-repository, and the pipeline validates its output against it before deploying.
+**Frozen in Step 2 (2026-10-10).** The canonical definition is the JSON Schemas in
+`src/publish/schema/` plus the cross-file checks in `src/publish/contract.py`
+(`python -m src.publish.contract <dir>`). The pipeline runs that check before every deploy, and
+nothing that fails it is published. The site repository's CI uses the same files from the pinned
+ETFRegulus tag. `schema_version` is 1 in every file. A breaking change bumps it, and the front end
+refuses a version it does not know.
 
-```
-data/
-  manifest.json            # data date, generated_at, code version (ETFRegulus tag + commit),
-                           # pipeline status, list of strategies and ceilings
-  universe.json            # tickers, names (zh/en), asset class, last close, inception date
-  today.json               # per strategy × ceiling: target weights, shares per 10,000 USD,
-                           # changes vs the previous session, lock expiry per held ETF,
-                           # drawdown state, whether capital preservation is active
-  backtest/<strategy>_D<5|10|15>.json
-                           # daily: date, equity, daily return, drawdown, weights (compact
-                           # column arrays); summary metrics; monthly and annual returns
-  risk.json                # the stress-scenario return matrix and the risk-layer parameters
-                           # the browser needs for the real-holdings rebalance (Step 6)
-  live/index.json          # the live log since launch, per strategy × ceiling
-```
+A portfolio is one strategy × ceiling, with the id `<strategy>_D<ceiling>` (e.g. `momentum_D5`).
+Weights are fractions of portfolio value with `CASH` included, nonzero entries only, summing to 1.
 
-Size estimate: about 5,700 sessions × 18 series. With column arrays and 4-decimal rounding, each
-backtest file is about 150–300 KB (gzip by Pages); it is loaded only when a detail page opens.
+| File | Content |
+|---|---|
+| `manifest.json` | `data_date`, `generated_at`, `status` (ok / failed) and `last_attempt` (time, status, message), `next_run`, code version (repo, tag, commit), config name and hash, `backtest_start`, `lock_days`, `ceilings`, the strategies (id, zh/en name and description, colour), the portfolio ids, and the path of every other file |
+| `universe.json` | Per ETF: ticker, zh/en name, asset class, inception, `close` and `prev_close` on `data_date`. Also the next ≥ 60 XNYS sessions from `data_date`, which the browser uses to compute lock expiry dates |
+| `today.json` | Per portfolio: weights at the close, drawdown, `risk_state` (normal / over_budget / capital_preservation), locks still in force (ticker → first session it may be sold), returns over 1 day / 1 month / YTD / 1 year, the last rebalance (date and per-ticker from → to), `traded_today`. Share counts are computed in the browser from weights × amount ÷ close |
+| `backtest/<portfolio>.json` | Daily `dates` and `equity` (growth of 1) as column arrays. Daily returns and drawdowns are derived in the browser. Weights sampled at each week's last session plus `data_date`, every rebalance, metrics (CAGR, volatility, Sharpe, max drawdown, Calmar, best and worst day, share of up days), and monthly and annual returns |
+| `risk.json` | The risk envelope's stress samples at `data_date` (rolling, block bootstrap, crisis windows; each a matrix of 5-day returns, CASH first) and its parameters (CVaR quantile, horizon, aggregation, over-budget rule). For the real-holdings rebalance (Step 6); provisional until then |
+| `live/index.json` | `launch_date` (null before launch) and, per portfolio, one entry per session since launch: date, that session's return, recommended weights, changes |
+
+**Failure handling in the data:** a failed run republishes the last good data files with a new
+`manifest.json` whose `status` is `failed` and whose `last_attempt` says what went wrong. The
+browser shows the update-failed banner from that alone.
+
+**Measured size** (fake data, full 2004–2026 history): about 280 KB per backtest file, 47 KB
+gzipped. That is 5.5 MB for all 18 portfolios, of which a page loads at most the few it shows.
+`today.json` is about 10 KB and `risk.json` about 150 KB.
+
+**Fake data:** `python -m scripts.fake_site_data --out webapp/fake_data` writes a complete,
+valid data set. It uses the real tickers and XNYS calendar, random prices, and simplified stand-in
+strategies. `--failed` writes the update-failed variant, and `--live-days 0` writes the
+before-launch state. The output is git-ignored; regenerate it when needed.
 
 ---
 
@@ -151,13 +161,18 @@ Goal: decide what the finished app looks like before writing any real pipeline.
 
 Check: every page opens on a phone and a desktop; the decisions list in §7 is filled in.
 
-### Step 2 — Freeze the data contract
+### Step 2 — Freeze the data contract ✅ (2026-10-10)
 
-1. Adjust §3 to what the mockups actually needed; write the JSON Schemas in `schema/`.
-2. Make the fake-data generator validate its output against the schemas. From here on, it is
-   the test fixture for the front end.
+1. Adjust §3 to what the mockups actually needed; write the JSON Schemas. Done:
+   `src/publish/schema/*.schema.json`, plus the cross-file checks in `src/publish/contract.py`.
+2. Make the fake-data generator validate its output against the schemas. Done:
+   `scripts/fake_site_data.py`. It and the real pipeline share `src/publish/build.py`, which turns
+   a simulated path into the documents, so derived numbers are computed one way only.
 
-Check: the fake data passes the schemas; the mockups still load it.
+Check: the fake data passes the contract (both variants). 20 tests in
+`tests/publish/test_contract.py` cover the validator rejecting 13 kinds of broken data, and the
+build helpers. The full suite passes (488). The mockup keeps its own in-page generator; wiring a
+page to the JSON files is part of Step 7, which starts from this fake data.
 
 ### Step 3 — The publish pipeline in ETFRegulus
 
