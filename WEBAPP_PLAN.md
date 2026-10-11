@@ -269,4 +269,15 @@ Check: Lighthouse on a phone profile is acceptable; every page works on the real
 
 ## 7. Decisions from the mockup review
 
-(To be filled in after Step 1.)
+Reviewed 2026-10-10 on the first mockup (`webapp/mockups/index.html`, fake data).
+
+- **Visual style: B (cards)** on every page, phone and desktop alike. Style A (compact tables) is
+  dropped.
+- **Pages and content: accepted as mocked.** Today, Strategies, Strategy detail, Compare,
+  Settings and About, with the content listed in §2. No page is added or removed.
+- **Polish is deferred.** The mockup is rough on purpose; spacing, wording, colours and chart
+  details are refined during Step 7 as real data shows what needs work, not in another mockup
+  round.
+- Kept from the mockup: gain/loss colours switchable, red-up by default; settings backup by
+  copy-and-paste text (file downloads are not relied on); the update-failed banner; the
+  lock-until badge on every locked holding.
