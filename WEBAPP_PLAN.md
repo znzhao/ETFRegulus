@@ -321,3 +321,20 @@ Reviewed 2026-10-10 on the first mockup (`webapp/mockups/index.html`, fake data)
 - Kept from the mockup: gain/loss colours switchable, red-up by default; settings backup by
   copy-and-paste text (file downloads are not relied on); the update-failed banner; the
   lock-until badge on every locked holding.
+
+## 8. Launch status (2026-10-11)
+
+The site is live at **https://znzhao.github.io/etfregulus-site/** (repository
+`znzhao/etfregulus-site`, public). It is built from ETFRegulus tag `webapp-v1`.
+
+| Step | Status |
+|---|---|
+| 4 — Live log | **Done.** `src/publish/live.py`; `s15_publish --log-dir` appends one line per new session, only after the output passes the contract. The site workflow commits `log/YYYY-MM.jsonl`. The first entry (launch date) is 2026-10-09 |
+| 5 — Site repository and workflow | **Done.** `.github/workflows/daily.yml`: cron 22:30 UTC Mon–Fri plus a 02:30 UTC retry, manual trigger, and a redeploy on app changes. It runs front-end unit tests, checks out ETFRegulus at `ETFREGULUS_REF`, installs `requirements-publish.txt` (no torch), runs s01 `--skip-fred` and s02 `--allow-missing-macro` (prices only; no secrets needed), s15, then commits the live log and deploys to Pages. A full run takes ~7 minutes on GitHub's runner; nothing runs on the local machine. The daily job uses its own fresh data, so `data/curated/` here is untouched (this closes Step 3 item 3) |
+| 6 — Real-holdings mode | **Partly done.** Lock-aware rebalance in the browser (`app/core.js` `realPlan`, unit-tested). The D-F risk rule is not yet ported to the browser; the page says so |
+| 7 — Front end | **Done (first version).** Static, no build step: `app/core.js` (pure logic, 17 Node unit tests), `app.js`, `i18n.js` (zh/en, key parity tested), `styles.css`; ECharts 5.5.0 from jsDelivr; style B cards; add-to-home-screen icons. An automated browser check (headless Edge, phone and desktop × zh/en × light/dark, every page, tab, range and control, plus failure states) reported no errors after the fixes from its screenshots |
+| 8 — Launch | **Live.** Data as of 2026-10-09; the next scheduled update is Monday 2026-10-12 after the close |
+
+Open items: port the risk rule to the browser (Step 6); O-2 stepwise de-risking (also fixes the
+drawdown overshoot); decide whether the research simulator adopts true holds
+(`MODEL_REDESIGN_PLAN.md` §14 item 5); move the workflow actions off Node 20 before GitHub removes it.
