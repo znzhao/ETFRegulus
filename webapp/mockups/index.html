@@ -1,0 +1,750 @@
+<title>ETFRegulus Daily</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: phone-first app shell — top bar on desktop, bottom tab bar on phones; content column max 1120px.
+   Petrol-blue accent on cool neutrals; gain/loss colours are semantic and user-switchable (red-up by default). */
+:root {
+  --bg: #f3f5f7; --surface: #ffffff; --surface-2: #eaeef2; --fg: #15212c; --muted: #5a6774;
+  --line: #d7dde4; --accent: #1d5c80; --accent-fg: #ffffff; --accent-soft: #dbe9f1;
+  --red: #c4343c; --green: #1d8a59; --warn: #a8690f; --warn-soft: #fbefd9;
+  --up: var(--red); --down: var(--green);
+  --f-display: "Bricolage Grotesque", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --f-body: "Instrument Sans", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e141a; --surface: #151d25; --surface-2: #1c2630; --fg: #e4ebf1; --muted: #93a1ae;
+  --line: #29343f; --accent: #63abd6; --accent-fg: #08202e; --accent-soft: #1b3343;
+  --red: #ef6870; --green: #3dbd85; --warn: #e3a743; --warn-soft: #3a2c13; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e141a; --surface: #151d25; --surface-2: #1c2630; --fg: #e4ebf1; --muted: #93a1ae;
+  --line: #29343f; --accent: #63abd6; --accent-fg: #08202e; --accent-soft: #1b3343;
+  --red: #ef6870; --green: #3dbd85; --warn: #e3a743; --warn-soft: #3a2c13; color-scheme: dark }
+:root[data-updown="green-up"] { --up: var(--green); --down: var(--red); }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--f-body); margin: 0; }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.2rem; } h3 { font-size: 1rem; }
+.num, td.n, th.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); } .up { color: var(--up); } .down { color: var(--down); }
+.label { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+a { color: var(--accent); }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.mock { background: var(--warn-soft); color: var(--fg); border-bottom: 1px solid var(--line); font-size: .8rem;
+  padding: 6px 16px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.mock b { color: var(--warn); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 3px 11px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface);
+  border-bottom: 1px solid var(--line); }
+.top-in { max-width: 1120px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 24px; }
+.brand { font-family: var(--f-display); font-weight: 700; font-size: 1.15rem; letter-spacing: -.01em; }
+.brand span { color: var(--accent); }
+nav.tabs { display: flex; gap: 4px; }
+nav.tabs a { text-decoration: none; color: var(--muted); padding: 6px 12px; border-radius: 8px; font-weight: 500; }
+nav.tabs a[aria-current="page"] { color: var(--fg); background: var(--surface-2); }
+.top-meta { margin-left: auto; font-size: .8rem; }
+nav.bottom { display: none; }
+
+main { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 96px; display: grid; gap: 20px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.stack { display: grid; gap: 12px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; padding: 2px 9px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.badge.ok::before, .badge.bad::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.badge.bad { background: var(--warn-soft); color: var(--warn); } .badge.bad::before { background: var(--warn); }
+.badge.lock { background: var(--accent-soft); color: var(--accent); }
+.chip { font-family: var(--f-mono); font-size: .78rem; padding: 1px 7px; border-radius: 6px; background: var(--surface-2); }
+.alert { border-radius: var(--r); padding: 10px 14px; background: var(--warn-soft); color: var(--fg); border: 1px solid var(--line); }
+.alert b { color: var(--warn); }
+
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: .78rem; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td.n, th.n { text-align: right; }
+tr:last-child td { border-bottom: 0; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.stat .v { font-family: var(--f-mono); font-size: 1.3rem; font-weight: 500; }
+.bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.gauge { position: relative; height: 8px; border-radius: 4px; background: var(--surface-2); }
+.gauge i { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--accent); }
+.gauge .lim { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--warn); }
+
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn:hover { border-color: var(--accent); }
+.chart { width: 100%; height: 300px; }
+.chart.sm { height: 220px; } .chart.lg { height: 380px; }
+.cal-wrap { overflow-x: auto; } .cal-wrap .chart { min-width: 760px; height: 170px; }
+
+/* Style B: cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 8px; min-width: 0; }
+.card.hl { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.card .big { font-family: var(--f-mono); font-size: 1.5rem; }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: center; }
+.etf-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.etf-card .tk { font-family: var(--f-mono); font-weight: 500; font-size: 1.05rem; }
+
+.form { display: grid; gap: 18px; max-width: 720px; }
+.field { display: grid; gap: 6px; }
+.field > label, .field > .label2 { font-weight: 600; }
+.field .hint { font-size: .82rem; color: var(--muted); }
+input[type=number], input[type=date], select, textarea { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+textarea { width: 100%; min-height: 90px; font: .8rem var(--f-mono); color: var(--fg); }
+.hold-row { display: grid; grid-template-columns: 1.2fr 1fr 1.3fr auto; gap: 8px; }
+.spark { display: block; }
+.legend-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+@media (max-width: 760px) {
+  nav.tabs, .top-meta { display: none; }
+  nav.bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  nav.bottom a { text-align: center; text-decoration: none; color: var(--muted); font-size: .72rem; padding: 8px 2px 10px; display: grid; gap: 2px; justify-items: center; }
+  nav.bottom a svg { width: 20px; height: 20px; }
+  nav.bottom a[aria-current="page"] { color: var(--accent); }
+  .grid2, .grid3, .hero { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hold-row { grid-template-columns: 1fr 1fr; }
+  h1 { font-size: 1.35rem; }
+  .chart { height: 250px; } .chart.lg { height: 300px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="mock" id="mockbar"></div>
+<header class="top"><div class="top-in">
+  <div class="brand">ETF<span>Regulus</span></div>
+  <nav class="tabs" id="tabs"></nav>
+  <div class="top-meta" id="topmeta"></div>
+</div></header>
+<main id="app"></main>
+<nav class="bottom" id="btabs"></nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+<script>
+"use strict";
+/* ============================================================ i18n */
+const I18N = {
+  zh: {
+    mockup: "草稿", fakeData: "假数据，仅用于看样式", style: "风格", simFail: "模拟更新失败",
+    today: "今日计划", strategies: "策略", compare: "对比", settings: "设置", about: "关于",
+    dataAsOf: "数据截至", updated: "已更新", updateFailed: "今日更新失败",
+    failMsg: "今天的自动更新没有成功，下面显示的是 {d} 的数据。修好后会自动恢复。",
+    myPlan: "我的计划", ceiling: "回撤上限", modeSim: "模拟持仓", modeReal: "我的真实持仓",
+    amount: "投入金额", value: "组合市值", drawdown: "当前回撤", riskState: "风控状态",
+    normal: "正常", reduced: "降低风险", preserve: "保本模式",
+    noTradeToday: "今天不需要交易。", lastRebal: "最近一次调仓", targetHoldings: "目标持仓",
+    ticker: "代码", name: "名称", weight: "权重", shares: "股数", price: "收盘价", mktValue: "市值",
+    change: "变化", lock: "锁定", lockedUntil: "锁定至", free: "可交易", buy: "买入", sell: "卖出", hold: "不变",
+    cash: "现金", trades: "交易清单", current: "当前", target: "目标", trade: "交易",
+    relock: "买入会让该 ETF 重新锁定 30 天", cashAfter: "交易后现金",
+    realNote: "按你录入的持仓和现金计算。锁定中的 ETF 不会被卖出。正式版还会套用和回测相同的风控规则。",
+    exampleNote: "示例持仓（在设置里改成你自己的）",
+    d1: "1 日", m1: "1 月", ytd: "今年", y1: "1 年", sharpe: "Sharpe", maxdd: "最大回撤", cagr: "年化收益", vol: "年化波动",
+    calmar: "Calmar", best: "最好一天", worst: "最差一天", posDays: "上涨天数", since: "回测自",
+    topHoldings: "主要持仓", open: "查看", equity: "净值", ddChart: "回撤", daily: "每日涨跌", holdings: "持仓变化",
+    calendar: "日历", monthly: "月度收益", metrics: "指标", live: "上线后的真实记录",
+    liveNote: "上线日开始每天记录当天的推荐，永不改写。以下为示例。",
+    benchmark: "对比基准", none: "无", all: "全部", year: "年份", total: "全年",
+    pickStrategies: "选择要对比的策略", rolling: "滚动 1 年 Sharpe",
+    planStrategy: "“我的计划”跟哪个策略", holdingsMode: "持仓来源", amountHint: "模拟模式：你打算投入这个策略的金额。",
+    cashHint: "真实持仓模式：你现在手上可以用来投资的现金。", realHoldings: "我的真实持仓",
+    realHint: "每只 ETF 填股数和最近一次买入的日期（用来算锁定期）。", addRow: "添加一行", remove: "删除",
+    peak: "组合历史最高市值（可选）", peakHint: "用来算你自己的回撤。不填则按没有回撤处理。",
+    language: "语言", theme: "主题", system: "跟随系统", light: "浅色", dark: "深色",
+    colors: "涨跌颜色", redUp: "红涨绿跌", greenUp: "绿涨红跌",
+    backup: "备份设置", backupHint: "设置只存在这台设备的浏览器里。复制下面的文本，在另一台设备的这里粘贴并导入。",
+    copy: "复制", copied: "已复制", importBtn: "导入", imported: "已导入", badJson: "格式不对，没有导入。",
+    privacy: "所有设置和持仓只保存在你的浏览器里，不会上传。",
+    aboutStrategies: "策略说明", rules: "规则", dataSources: "数据来源", pipeline: "更新状态",
+    disclaimer: "本网站只是个人研究项目的展示，不构成投资建议。",
+    rulesText: "每只 ETF 买入后锁定 30 个自然日，期间不能卖出；再次买入会重新锁定。只做多，现金不锁定。组合回撤接近上限时降低风险，超过上限时进入保本模式。",
+    dataText: "ETF 价格来自 Yahoo Finance（yfinance），每个交易日美股收盘后由 GitHub Actions 自动更新。",
+    lastRun: "最近一次运行", nextRun: "下一次运行", status: "状态", success: "成功", failed: "失败",
+    strategyDesc: {
+      cash: "全部持有现金。用来对比的最低基准。",
+      spy_buy_hold: "全部买入标普 500（SPY）并持有。",
+      equal_weight: "每月把资金平均分给所有可交易的 ETF。",
+      spy_tlt_60_40: "60% 标普 500（SPY）+ 40% 长期美债（TLT），每月再平衡。",
+      momentum: "每月买入过去一年涨得最好的 3 只 ETF。",
+      classical_optimizer: "按波动率倒数分配，波动小的多配，每只最多 25%。"
+    },
+    range: { "1M": "1月", "3M": "3月", YTD: "今年", "1Y": "1年", "5Y": "5年", ALL: "全部" },
+    asOfShort: "截至", per10k: "按投入金额折算", none2: "—", sample: "示例",
+    styleA: "A 紧凑表格", styleB: "B 卡片"
+  },
+  en: {
+    mockup: "Mockup", fakeData: "fake data, for layout only", style: "Style", simFail: "Simulate failed update",
+    today: "Today", strategies: "Strategies", compare: "Compare", settings: "Settings", about: "About",
+    dataAsOf: "Data as of", updated: "Updated", updateFailed: "Update failed today",
+    failMsg: "Today's automatic update did not succeed. You are seeing data as of {d}. It recovers on its own once fixed.",
+    myPlan: "My plan", ceiling: "Drawdown ceiling", modeSim: "Simulated holdings", modeReal: "My real holdings",
+    amount: "Amount invested", value: "Portfolio value", drawdown: "Current drawdown", riskState: "Risk state",
+    normal: "Normal", reduced: "Reduced risk", preserve: "Capital preservation",
+    noTradeToday: "No trades needed today.", lastRebal: "Last rebalance", targetHoldings: "Target holdings",
+    ticker: "Ticker", name: "Name", weight: "Weight", shares: "Shares", price: "Close", mktValue: "Value",
+    change: "Change", lock: "Lock", lockedUntil: "Locked until", free: "Free", buy: "Buy", sell: "Sell", hold: "Hold",
+    cash: "Cash", trades: "Trade list", current: "Current", target: "Target", trade: "Trade",
+    relock: "Buying relocks this ETF for 30 days", cashAfter: "Cash after trades",
+    realNote: "Based on the holdings and cash you entered. Locked ETFs are never sold. The full version also applies the same risk rule as the backtest.",
+    exampleNote: "Example holdings (replace them in Settings)",
+    d1: "1D", m1: "1M", ytd: "YTD", y1: "1Y", sharpe: "Sharpe", maxdd: "Max drawdown", cagr: "CAGR", vol: "Volatility",
+    calmar: "Calmar", best: "Best day", worst: "Worst day", posDays: "Up days", since: "Backtest since",
+    topHoldings: "Top holdings", open: "Open", equity: "Equity", ddChart: "Drawdown", daily: "Daily returns", holdings: "Holdings",
+    calendar: "Calendar", monthly: "Monthly returns", metrics: "Metrics", live: "Live record since launch",
+    liveNote: "From launch day on, each day's recommendation is logged and never rewritten. Sample rows below.",
+    benchmark: "Benchmark", none: "None", all: "All", year: "Year", total: "Year",
+    pickStrategies: "Strategies to compare", rolling: "Rolling 1-year Sharpe",
+    planStrategy: "Strategy for “my plan”", holdingsMode: "Holdings source", amountHint: "Simulated mode: the amount you put into the strategy.",
+    cashHint: "Real-holdings mode: the cash you have available to invest now.", realHoldings: "My real holdings",
+    realHint: "Shares per ETF and the date of the last purchase (sets the lock).", addRow: "Add row", remove: "Remove",
+    peak: "Highest portfolio value so far (optional)", peakHint: "Used for your own drawdown. Left empty, the drawdown is taken as zero.",
+    language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark",
+    colors: "Gain/loss colours", redUp: "Red up, green down", greenUp: "Green up, red down",
+    backup: "Back up settings", backupHint: "Settings live only in this device's browser. Copy the text below and paste it here on another device to import.",
+    copy: "Copy", copied: "Copied", importBtn: "Import", imported: "Imported", badJson: "That text is not a valid backup; nothing was imported.",
+    privacy: "All settings and holdings stay in your browser. Nothing is uploaded.",
+    aboutStrategies: "Strategies", rules: "Rules", dataSources: "Data", pipeline: "Update status",
+    disclaimer: "This site shows a personal research project. It is not investment advice.",
+    rulesText: "Each ETF is locked for 30 calendar days after a purchase and cannot be sold meanwhile; buying more relocks it. Long-only; cash is never locked. Risk is reduced as the drawdown nears the ceiling, and capital preservation starts once it passes the ceiling.",
+    dataText: "ETF prices come from Yahoo Finance (yfinance) and are refreshed by GitHub Actions after each US market close.",
+    lastRun: "Last run", nextRun: "Next run", status: "Status", success: "Succeeded", failed: "Failed",
+    strategyDesc: {
+      cash: "Holds only cash. The floor every strategy is compared with.",
+      spy_buy_hold: "Buys the S&P 500 (SPY) and holds it.",
+      equal_weight: "Splits capital equally across every tradable ETF each month.",
+      spy_tlt_60_40: "60% S&P 500 (SPY) and 40% long Treasuries (TLT), rebalanced monthly.",
+      momentum: "Each month, buys the 3 ETFs with the best one-year return.",
+      classical_optimizer: "Inverse-volatility weights: calmer ETFs get more, at most 25% each."
+    },
+    range: { "1M": "1M", "3M": "3M", YTD: "YTD", "1Y": "1Y", "5Y": "5Y", ALL: "All" },
+    asOfShort: "as of", per10k: "scaled to your amount", none2: "—", sample: "Sample",
+    styleA: "A compact tables", styleB: "B cards"
+  }
+};
+
+/* ============================================================ universe */
+const UNIVERSE = [
+  ["SPY","标普500","S&P 500","eq",1.0,.002,0,"2003-01-01"],["QQQ","纳斯达克100","Nasdaq-100","eq",1.15,.006,.0001,"2003-01-01"],
+  ["IWM","罗素2000","Russell 2000","eq",1.1,.007,0,"2003-01-01"],["XLK","科技","Technology","sec",1.2,.008,.0001,"2003-01-01"],
+  ["XLC","通信","Communication","sec",1.0,.009,0,"2018-06-19"],["XLY","可选消费","Consumer discr.","sec",1.1,.008,0,"2003-01-01"],
+  ["XLP","必需消费","Consumer staples","sec",.6,.007,0,"2003-01-01"],["XLE","能源","Energy","sec",1.0,.013,-.0001,"2003-01-01"],
+  ["XLF","金融","Financials","sec",1.2,.009,-.0001,"2003-01-01"],["XLI","工业","Industrials","sec",1.05,.007,0,"2003-01-01"],
+  ["XLB","材料","Materials","sec",1.05,.009,0,"2003-01-01"],["XLV","医疗","Health care","sec",.75,.007,.00005,"2003-01-01"],
+  ["XLU","公用事业","Utilities","sec",.55,.008,0,"2003-01-01"],["XLRE","房地产","Real estate","sec",.9,.009,-.00005,"2015-10-08"],
+  ["SHY","1-3年美债","1-3Y Treasury","tsy",-.02,.0006,.0001,"2003-01-01"],["IEF","7-10年美债","7-10Y Treasury","tsy",-.12,.003,.00012,"2003-01-01"],
+  ["TLT","20年+美债","20Y+ Treasury","tsy",-.3,.008,.00015,"2003-01-01"],["TIP","通胀保值债","TIPS","tsy",-.05,.003,.00012,"2003-01-01"],
+  ["LQD","投资级公司债","IG corporate","cr",.1,.004,.00015,"2003-01-01"],["HYG","高收益债","High yield","cr",.4,.003,.0001,"2007-04-11"],
+  ["GLD","黄金","Gold","ra",.05,.011,.00025,"2004-11-18"],["DBC","大宗商品","Commodities","ra",.4,.012,-.0001,"2006-02-06"],
+  ["VEA","发达市场","Developed ex-US","intl",.95,.006,-.0001,"2007-07-26"],["VWO","新兴市场","Emerging markets","intl",1.05,.009,-.00005,"2005-03-10"]
+].map(([t, zh, en, cls, beta, idio, mu, inc]) => ({ t, zh, en, cls, beta, idio, mu, inc }));
+const DUR = { SHY: .1, IEF: .5, TLT: 1.2, TIP: .5, LQD: .8, HYG: .4 };
+const SAFE = new Set(["SHY"]);
+const STRATS = ["spy_tlt_60_40", "momentum", "classical_optimizer", "equal_weight", "spy_buy_hold", "cash"];
+const SNAME = {
+  cash: ["现金", "Cash"], spy_buy_hold: ["SPY 买入持有", "SPY buy & hold"], equal_weight: ["等权", "Equal weight"],
+  spy_tlt_60_40: ["60/40 股债", "60/40 SPY-TLT"], momentum: ["动量", "Momentum"], classical_optimizer: ["经典优化器", "Classical optimizer"]
+};
+const SCOLOR = { spy_tlt_60_40: "#7a5bb5", momentum: "#2a9d8f", classical_optimizer: "#c4567a", equal_weight: "#d08a2e", spy_buy_hold: "#3d7fc4", cash: "#8a96a3" };
+const CLS_HUE = { eq: 210, sec: 190, tsy: 265, cr: 300, ra: 38, intl: 150 };
+const CEILINGS = [5, 10, 15];
+const LOCK_DAYS = 30, DAY = 864e5;
+
+/* ============================================================ fake data (same shape the real pipeline will write) */
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const iso = ms => new Date(ms).toISOString().slice(0, 10);
+const ms = s => Date.parse(s + "T00:00:00Z");
+
+function generate(failed) {
+  const rnd = mulberry(20261009);
+  const g = () => { let u = 0; while (u === 0) u = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd()); };
+  const end = failed ? "2026-10-08" : "2026-10-09";
+  const sessions = [];
+  for (let d = ms("2004-01-02"); d <= ms("2026-10-09"); d += DAY) { const w = new Date(d).getUTCDay(); if (w && w < 6) sessions.push(d); }
+  const N0 = sessions.length, A = UNIVERSE.length;
+  const R = UNIVERSE.map(() => new Float64Array(N0)), P = UNIVERSE.map(() => new Float64Array(N0));
+  const reg = d => {
+    if (d >= ms("2008-09-01") && d <= ms("2009-03-09")) return [-.0025, .028, 1, 0];
+    if (d > ms("2009-03-09") && d <= ms("2009-12-31")) return [.002, .014, 1, 0];
+    if (d >= ms("2020-02-20") && d <= ms("2020-03-23")) return [-.012, .045, 1, 0];
+    if (d > ms("2020-03-23") && d <= ms("2020-08-31")) return [.003, .016, 1, 0];
+    if (d >= ms("2022-01-03") && d <= ms("2022-10-12")) return [-.0009, .015, -2, -.0006];
+    return [.0004, .0105, 1, 0];
+  };
+  for (let t = 0; t < N0; t++) {
+    const [md, mv, bb, bd] = reg(sessions[t]); const m = md + mv * g();
+    UNIVERSE.forEach((u, i) => {
+      const bond = DUR[u.t] !== undefined;
+      const beta = bond && u.beta < 0.2 ? u.beta * bb : u.beta;
+      R[i][t] = u.mu + beta * m + u.idio * g() + (bond ? bd * DUR[u.t] : 0);
+      P[i][t] = sessions[t] < ms(u.inc) ? NaN : (t === 0 || isNaN(P[i][t - 1]) ? 50 + 150 * rnd() : P[i][t - 1] * (1 + R[i][t]));
+    });
+  }
+  const N = failed ? N0 - 1 : N0;
+  const ses = sessions.slice(0, N);
+  const runs = {};
+  for (const s of STRATS) for (const D of CEILINGS) runs[s + "_D" + D] = runStrategy(s, D / 100, ses, R, P, N, A);
+  const universe = UNIVERSE.map((u, i) => ({ ...u, close: P[i][N - 1], prev: P[i][N - 2] }));
+  const manifest = {
+    dataDate: iso(ses[N - 1]), generatedAt: failed ? "2026-10-08 22:41 UTC" : "2026-10-09 22:41 UTC",
+    status: failed ? "failed" : "ok", failedAt: failed ? "2026-10-09 22:38 UTC" : null,
+    code: "ETFRegulus v0.1.0 (dda491b)", config: "redesign_df f8adbcc9", nextRun: "2026-10-12 22:30 UTC"
+  };
+  return { manifest, universe, sessions: ses, runs };
+}
+
+function baseTarget(s, t, P, A) {
+  const w = new Float64Array(A + 1), av = [];
+  for (let i = 0; i < A; i++) if (!isNaN(P[i][t])) av.push(i);
+  const idx = tk => UNIVERSE.findIndex(u => u.t === tk);
+  if (s === "cash") { w[0] = 1; return w; }
+  if (s === "spy_buy_hold") { w[1 + idx("SPY")] = 1; return w; }
+  if (s === "spy_tlt_60_40") { w[1 + idx("SPY")] = .6; w[1 + idx("TLT")] = .4; return w; }
+  if (s === "equal_weight") { av.forEach(i => w[1 + i] = 1 / av.length); return w; }
+  if (s === "momentum") {
+    const sc = av.filter(i => t >= 252 && !isNaN(P[i][t - 252])).map(i => [i, P[i][t] / P[i][t - 252] - 1]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (!sc.length) { w[0] = 1; return w; }
+    sc.forEach(([i]) => w[1 + i] = 1 / 3); w[0] = 1 - sc.length / 3; return w;
+  }
+  // classical optimizer: inverse 63-day volatility, capped at 25%
+  const iv = av.filter(i => t >= 63 && !isNaN(P[i][t - 63])).map(i => {
+    let s2 = 0; for (let k = t - 62; k <= t; k++) { const r = P[i][k] / P[i][k - 1] - 1; s2 += r * r; } return [i, 1 / Math.sqrt(s2 / 63 + 1e-8)];
+  });
+  if (!iv.length) { w[0] = 1; return w; }
+  let tot = iv.reduce((a, x) => a + x[1], 0);
+  iv.forEach(([i, v]) => w[1 + i] = Math.min(.25, v / tot));
+  w[0] = Math.max(0, 1 - w.reduce((a, b) => a + b, 0));
+  return w;
+}
+
+function runStrategy(s, D, ses, R, P, N, A) {
+  const eq = new Float64Array(N), ret = new Float64Array(N), dd = new Float64Array(N), W = new Float32Array(N * (A + 1));
+  const lastBuy = new Float64Array(A).fill(-1e15);
+  let w = new Float64Array(A + 1); w[0] = 1; let e = 1, mode = -1; const hist = []; const rebal = [];
+  for (let t = 0; t < N; t++) {
+    if (t > 0) {
+      let r = 0; for (let i = 0; i < A; i++) r += w[i + 1] * R[i][t];
+      e *= 1 + r; ret[t] = r;
+      for (let i = 0; i < A; i++) w[i + 1] *= (1 + R[i][t]) / (1 + r);
+      w[0] /= 1 + r;
+    }
+    eq[t] = e; hist.push(e); if (hist.length > 252) hist.shift();
+    const pk = Math.max(...hist); dd[t] = 1 - e / pk;
+    const m = dd[t] > D ? 2 : dd[t] > .6 * D ? 1 : 0;
+    const monthStart = t === 0 || new Date(ses[t]).getUTCMonth() !== new Date(ses[t - 1]).getUTCMonth();
+    if (monthStart || m !== mode) {
+      const tg = baseTarget(s, t, P, A);
+      const sc = m === 2 ? .2 : m === 1 ? .6 : 1;
+      for (let i = 0; i < A; i++) if (!SAFE.has(UNIVERSE[i].t)) { tg[0] += tg[i + 1] * (1 - sc); tg[i + 1] *= sc; }
+      let extra = 0; const locked = new Set();
+      for (let i = 0; i < A; i++) if (w[i + 1] > tg[i + 1] && ses[t] - lastBuy[i] < LOCK_DAYS * DAY) { extra += w[i + 1] - tg[i + 1]; tg[i + 1] = w[i + 1]; locked.add(i); }
+      const take = Math.min(extra, tg[0]); tg[0] -= take; extra -= take;
+      if (extra > 1e-9) { let fr = 0; for (let i = 0; i < A; i++) if (!locked.has(i)) fr += tg[i + 1]; for (let i = 0; i < A; i++) if (!locked.has(i) && fr > 0) tg[i + 1] *= 1 - extra / fr; }
+      const ch = [];
+      for (let i = 0; i < A; i++) { const d = tg[i + 1] - w[i + 1]; if (Math.abs(d) > .002) { ch.push({ i, from: w[i + 1], to: tg[i + 1] }); if (d > 0) lastBuy[i] = ses[t]; } }
+      if (ch.length) rebal.push({ t, ch });
+      w = tg; mode = m;
+    }
+    W.set(w, t * (A + 1));
+  }
+  return { eq, ret, dd, W, rebal, lastBuy: Array.from(lastBuy), mode, D };
+}
+
+/* ============================================================ state */
+const DEFAULTS = {
+  lang: "zh", theme: "system", updown: "red-up", plan: "spy_tlt_60_40", ceiling: 5, mode: "sim",
+  amount: 100000, cash: 20000, peak: "", style: "A", failed: false,
+  holdings: [{ t: "SPY", sh: 120, d: "2026-09-25" }, { t: "TLT", sh: 300, d: "2026-07-15" }, { t: "GLD", sh: 40, d: "2026-08-20" }]
+};
+let S = load();
+function load() { try { const x = JSON.parse(localStorage.getItem("etfr-mock") || "null"); return x ? { ...DEFAULTS, ...x } : { ...DEFAULTS }; } catch (e) { return { ...DEFAULTS }; } }
+function save() { try { localStorage.setItem("etfr-mock", JSON.stringify(S)); } catch (e) { } }
+let DATA = generate(S.failed);
+const t = k => (I18N[S.lang][k] ?? k);
+const sn = s => SNAME[s][S.lang === "zh" ? 0 : 1];
+const un = u => S.lang === "zh" ? u.zh : u.en;
+const run = (s, D) => DATA.runs[s + "_D" + (D ?? S.ceiling)];
+
+/* ============================================================ helpers */
+const pct = (x, d = 1, sign = false) => (x == null || isNaN(x)) ? "—" : (sign && x > 0 ? "+" : "") + (100 * x).toFixed(d) + "%";
+const money = x => new Intl.NumberFormat(S.lang === "zh" ? "zh-CN" : "en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(x);
+const num = (x, d = 2) => x.toLocaleString(S.lang === "zh" ? "zh-CN" : "en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const cls = x => x > 0 ? "up" : x < 0 ? "down" : "";
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const alpha = (hex, a) => { const h = hex.replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+const N = () => DATA.sessions.length;
+const lastIdx = () => N() - 1;
+function lockUntil(buyMs) {
+  if (buyMs < 0) return null; let d = buyMs + LOCK_DAYS * DAY;
+  while ([0, 6].includes(new Date(d).getUTCDay())) d += DAY; return d;
+}
+function idxBack(n) { return Math.max(0, lastIdx() - n); }
+function ytdStart() { const y = new Date(DATA.sessions[lastIdx()]).getUTCFullYear(); const i = DATA.sessions.findIndex(d => new Date(d).getUTCFullYear() === y); return Math.max(0, i - 1); }
+function retBetween(r, a, b) { return r.eq[b] / r.eq[a] - 1; }
+function metrics(r, a = 0, b = lastIdx()) {
+  const n = b - a; let s = 0, s2 = 0, pos = 0, best = -1, worst = 1, mdd = 0, pk = 0;
+  for (let i = a + 1; i <= b; i++) { const x = r.ret[i]; s += x; s2 += x * x; if (x > 0) pos++; best = Math.max(best, x); worst = Math.min(worst, x); }
+  for (let i = a; i <= b; i++) { pk = Math.max(pk, r.eq[i]); mdd = Math.max(mdd, 1 - r.eq[i] / pk); }
+  const mean = s / n, sd = Math.sqrt(Math.max(s2 / n - mean * mean, 0));
+  const years = n / 252, cagr = Math.pow(r.eq[b] / r.eq[a], 1 / years) - 1;
+  return { cagr, vol: sd * Math.sqrt(252), sharpe: sd > 0 ? mean / sd * Math.sqrt(252) : 0, mdd, calmar: mdd > 0 ? cagr / mdd : 0, best, worst, pos: pos / n };
+}
+function weightsAt(r, i) { const A = UNIVERSE.length; return Array.from(r.W.subarray(i * (A + 1), (i + 1) * (A + 1))); }
+function spark(r, n = 252, w = 120, h = 32) {
+  const a = idxBack(n), ys = []; for (let i = a; i <= lastIdx(); i += 2) ys.push(r.eq[i]);
+  const lo = Math.min(...ys), hi = Math.max(...ys), sx = w / (ys.length - 1), sy = v => h - 3 - (v - lo) / ((hi - lo) || 1) * (h - 6);
+  const d = ys.map((v, k) => (k ? "L" : "M") + (k * sx).toFixed(1) + " " + sy(v).toFixed(1)).join("");
+  const c = ys[ys.length - 1] >= ys[0] ? "var(--up)" : "var(--down)";
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="${c}" stroke-width="1.5"/><circle cx="${w}" cy="${sy(ys[ys.length - 1]).toFixed(1)}" r="2.5" fill="${c}"/></svg>`;
+}
+function assetColor(i) { const u = UNIVERSE[i]; const sameCls = UNIVERSE.filter(x => x.cls === u.cls); const k = sameCls.indexOf(u); const dark = document.documentElement.dataset.dark === "1"; return `hsl(${CLS_HUE[u.cls] + k * 9} ${45 + (k % 3) * 12}% ${(dark ? 58 : 42) + (k % 4) * 7}%)`; }
+function seg(name, opts, cur) { return `<span class="seg" role="group">${opts.map(([v, l]) => `<button data-set="${name}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join("")}</span>`; }
+
+/* ============================================================ charts */
+let charts = [];
+function mk(id, opt) {
+  const el = document.getElementById(id); if (!el || !window.echarts) return;
+  const c = echarts.init(el, null, { renderer: "canvas" });
+  const fg = css("--fg"), mu = css("--muted"), ln = css("--line");
+  c.setOption(Object.assign({
+    animation: false, textStyle: { fontFamily: css("--f-body"), color: fg },
+    grid: { left: 52, right: 16, top: 24, bottom: 36 },
+    tooltip: { trigger: "axis", backgroundColor: css("--surface"), borderColor: ln, textStyle: { color: fg, fontSize: 12 } },
+  }, opt));
+  if (opt.xAxis) c.setOption({
+    xAxis: [].concat(opt.xAxis || []).map(() => ({ axisLine: { lineStyle: { color: ln } }, axisLabel: { color: mu }, splitLine: { show: false } })),
+    yAxis: [].concat(opt.yAxis || []).map(() => ({ axisLabel: { color: mu }, splitLine: { lineStyle: { color: ln, opacity: .6 } } })),
+  });
+  charts.push(c);
+}
+window.addEventListener("resize", () => charts.forEach(c => c.resize()));
+const dates = (a, b) => DATA.sessions.slice(a, b + 1).map(iso);
+function rangeStart(k) { return { "1M": idxBack(21), "3M": idxBack(63), YTD: ytdStart(), "1Y": idxBack(252), "5Y": idxBack(1260), ALL: 0 }[k]; }
+
+/* ============================================================ pages */
+const ROUTES = ["today", "strategies", "compare", "settings", "about"];
+const ICONS = {
+  today: '<path d="M4 6h16M4 12h10M4 18h7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+  strategies: '<path d="M4 18l5-6 4 3 7-9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+  compare: '<path d="M7 4v16M17 4v16M3 9h8M13 15h8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+  settings: '<circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  about: '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+};
+let compareSel = ["spy_tlt_60_40", "momentum", "spy_buy_hold"], detailRange = "ALL", detailTab = "equity", bench = "spy_buy_hold", calYear = 2026, cmpRange = "5Y";
+
+function freshness() {
+  const m = DATA.manifest;
+  return m.status === "ok"
+    ? `<span class="badge ok">${t("dataAsOf")} ${m.dataDate}</span>`
+    : `<span class="badge bad">${t("updateFailed")}</span>`;
+}
+function failBanner() {
+  return DATA.manifest.status === "ok" ? "" : `<div class="alert"><b>${t("updateFailed")}.</b> ${t("failMsg").replace("{d}", DATA.manifest.dataDate)}</div>`;
+}
+const RISK = m => [t("normal"), t("reduced"), t("preserve")][m];
+
+function planHeader(r) {
+  const li = lastIdx();
+  const gaugeW = Math.min(100, r.dd[li] / (r.D * 1.4) * 100), limL = 1 / 1.4 * 100;
+  return `<div class="row" style="justify-content:space-between">
+      <div class="stack" style="gap:4px"><span class="label">${t("myPlan")}</span>
+      <h1>${sn(S.plan)} <span class="muted" style="font-weight:600">· ${t("ceiling")} ${S.ceiling}%</span></h1></div>
+      <div class="row">${seg("ceiling", CEILINGS.map(c => [c, c + "%"]), S.ceiling)}${seg("mode", [["sim", t("modeSim")], ["real", t("modeReal")]], S.mode)}</div>
+    </div>
+    <div class="stats panel">
+      <div class="stat"><div class="label">${S.mode === "sim" ? t("amount") : t("value")}</div><div class="v">${money(S.mode === "sim" ? S.amount : realTotal())}</div></div>
+      <div class="stat"><div class="label">${t("d1")}</div><div class="v ${cls(r.ret[li])}">${pct(r.ret[li], 2, true)}</div></div>
+      <div class="stat"><div class="label">${t("ytd")}</div><div class="v ${cls(retBetween(r, ytdStart(), li))}">${pct(retBetween(r, ytdStart(), li), 1, true)}</div></div>
+      <div class="stat"><div class="label">${t("drawdown")} · ${RISK(r.mode)}</div><div class="v">${pct(-r.dd[li], 1)}</div>
+        <div class="gauge" title="${t("ceiling")} ${S.ceiling}%"><i style="width:${gaugeW}%"></i><span class="lim" style="left:${limL}%"></span></div></div>
+    </div>`;
+}
+
+function simRows(r) {
+  const li = lastIdx(), w = weightsAt(r, li);
+  const rows = [];
+  UNIVERSE.forEach((u, i) => {
+    if (w[i + 1] < 1e-4) return;
+    const lu = lockUntil(r.lastBuy[i]); const locked = lu && lu > DATA.sessions[li];
+    rows.push({ i, u, w: w[i + 1], sh: Math.floor(S.amount * w[i + 1] / u.close), locked, lu });
+  });
+  rows.sort((a, b) => b.w - a.w);
+  return { rows, cashW: w[0] };
+}
+function lastRebalance(r) {
+  const rb = r.rebal[r.rebal.length - 1]; if (!rb) return "";
+  const today = rb.t === lastIdx();
+  return `<div class="panel stack"><div class="row" style="justify-content:space-between"><h3>${today ? t("trades") : t("lastRebal")} · ${iso(DATA.sessions[rb.t])}</h3>
+    ${today ? "" : `<span class="muted">${t("noTradeToday")}</span>`}</div>
+    <div class="row">${rb.ch.map(c => { const d = c.to - c.from; return `<span class="chip"><span class="${d > 0 ? "up" : "down"}">${d > 0 ? t("buy") : t("sell")}</span> ${UNIVERSE[c.i].t} ${pct(c.from, 0)}→${pct(c.to, 0)}</span>`; }).join("")}</div></div>`;
+}
+function lockCell(x) { return x.locked ? `<span class="badge lock">${t("lockedUntil")} ${iso(x.lu).slice(5)}</span>` : `<span class="muted">${t("free")}</span>`; }
+
+function pageToday() {
+  const r = run(S.plan); const li = lastIdx();
+  let body;
+  if (S.mode === "real") body = realView(r);
+  else {
+    const { rows, cashW } = simRows(r);
+    if (S.style === "A") {
+      body = `<div class="panel stack"><div class="row" style="justify-content:space-between"><h2>${t("targetHoldings")}</h2><span class="muted">${t("per10k")}: ${money(S.amount)}</span></div>
+      <div class="tbl-wrap"><table><thead><tr><th>${t("ticker")}</th><th>${t("name")}</th><th class="n">${t("weight")}</th><th class="n">${t("shares")}</th><th class="n">${t("price")}</th><th class="n">${t("d1")}</th><th>${t("lock")}</th></tr></thead><tbody>
+      ${rows.map(x => { return `<tr><td class="num"><b>${x.u.t}</b></td><td>${un(x.u)}</td><td class="n">${pct(x.w)}</td><td class="n">${x.sh}</td><td class="n">${num(x.u.close)}</td><td class="n ${cls(rowRet(x.i))}">${pct(rowRet(x.i), 2, true)}</td><td>${lockCell(x)}</td></tr>`; }).join("")}
+      <tr><td class="num"><b>${t("cash")}</b></td><td></td><td class="n">${pct(cashW)}</td><td class="n">${money(S.amount * cashW)}</td><td></td><td></td><td class="muted">${t("free")}</td></tr>
+      </tbody></table></div></div>${lastRebalance(r)}`;
+    } else {
+      body = `<div class="panel hero"><div id="c-donut" class="chart sm"></div>
+        <div class="stack">${rows.map(x => `<div class="etf-card"><span class="tk">${x.u.t}</span>
+          <div class="stack" style="gap:3px"><span>${un(x.u)} · <span class="num">${x.sh}</span> ${t("shares")}</span><div class="bar"><i style="width:${x.w * 100}%;background:${assetColor(x.i)}"></i></div></div>
+          <div style="text-align:right"><div class="num">${pct(x.w)}</div>${x.locked ? `<span class="badge lock">🔒 ${iso(x.lu).slice(5)}</span>` : ""}</div></div>`).join("")}
+          <div class="etf-card"><span class="tk">${t("cash")}</span><div class="bar"><i style="width:${cashW * 100}%;background:var(--muted)"></i></div><div class="num">${pct(cashW)}</div></div>
+        </div></div>${lastRebalance(r)}`;
+    }
+  }
+  const others = S.style === "B" ? "" : `<div class="panel stack"><h3>${t("strategies")} · ${t("d1")}</h3><div class="row">${STRATS.filter(s => s !== S.plan).map(s => { const x = run(s); return `<a class="chip" href="#detail-${s}" style="text-decoration:none;color:inherit">${sn(s)} <span class="${cls(x.ret[li])}">${pct(x.ret[li], 2, true)}</span></a>`; }).join("")}</div></div>`;
+  return `${failBanner()}${planHeader(r)}${body}${others}`;
+}
+function rowRet(i) { const u = DATA.universe[i]; return u.close / u.prev - 1; }
+
+/* real-holdings mode (mockup: lock-aware rebalance; risk rule comes in the full version) */
+function realTotal() { return Number(S.cash || 0) + S.holdings.reduce((a, h) => { const u = UNIVERSE.find(x => x.t === h.t); return a + (u ? h.sh * DATA.universe[UNIVERSE.indexOf(u)].close : 0); }, 0); }
+function realPlan(r) {
+  const li = lastIdx(), w = weightsAt(r, li), today = DATA.sessions[li];
+  const total = realTotal();
+  const cur = UNIVERSE.map((u, i) => { const h = S.holdings.find(x => x.t === u.t); return { i, u, sh: h ? +h.sh : 0, d: h ? h.d : null, px: DATA.universe[i].close }; });
+  cur.forEach(c => { c.val = c.sh * c.px; c.lu = c.d ? lockUntil(ms(c.d)) : null; c.locked = c.lu && c.lu > today; c.want = w[c.i + 1] * total; });
+  const kept = cur.filter(c => c.locked && c.val > c.want);
+  const keptVal = kept.reduce((a, c) => a + c.val, 0), keptWant = kept.reduce((a, c) => a + c.want, 0);
+  const scale = (total - keptVal) / Math.max(total - keptWant, 1);
+  cur.forEach(c => { const tv = kept.includes(c) ? c.val : c.want * scale; c.tsh = kept.includes(c) ? c.sh : Math.floor(tv / c.px); c.trade = c.tsh - c.sh; });
+  const invested = cur.reduce((a, c) => a + c.tsh * c.px, 0);
+  return { rows: cur.filter(c => c.sh || c.tsh), cashAfter: total - invested, total };
+}
+function realView(r) {
+  const p = realPlan(r);
+  return `<div class="panel stack"><div class="row" style="justify-content:space-between"><h2>${t("trades")}</h2><span class="muted">${t("cash")}: ${money(S.cash)}</span></div>
+    <p class="muted" style="margin:0;font-size:.85rem">${t("realNote")}</p>
+    <div class="tbl-wrap"><table><thead><tr><th>${t("ticker")}</th><th class="n">${t("current")}</th><th class="n">${t("target")}</th><th class="n">${t("trade")}</th><th class="n">${t("mktValue")}</th><th>${t("lock")}</th></tr></thead><tbody>
+    ${p.rows.map(c => `<tr><td class="num"><b>${c.u.t}</b> <span class="muted">${un(c.u)}</span></td><td class="n">${c.sh}</td><td class="n">${c.tsh}</td>
+      <td class="n ${c.trade > 0 ? "up" : c.trade < 0 ? "down" : ""}">${c.trade > 0 ? t("buy") + " " + c.trade : c.trade < 0 ? t("sell") + " " + (-c.trade) : t("hold")}</td>
+      <td class="n">${money(c.tsh * c.px)}</td><td>${c.locked ? `<span class="badge lock">${t("lockedUntil")} ${iso(c.lu).slice(5)}</span>` : c.trade > 0 ? `<span class="muted" title="${t("relock")}">${t("relock")}</span>` : `<span class="muted">${t("free")}</span>`}</td></tr>`).join("")}
+    <tr><td><b>${t("cashAfter")}</b></td><td></td><td></td><td></td><td class="n">${money(p.cashAfter)}</td><td></td></tr></tbody></table></div>
+    <span class="badge">${t("exampleNote")}</span></div>`;
+}
+
+function pageStrategies() {
+  const li = lastIdx();
+  const data = STRATS.map(s => { const r = run(s), m = metrics(r), w = weightsAt(r, li); const top = UNIVERSE.map((u, i) => [u.t, w[i + 1]]).filter(x => x[1] > .005).sort((a, b) => b[1] - a[1]).slice(0, 3); if (w[0] > .005) top.push([t("cash"), w[0]]); return { s, r, m, top }; });
+  const head = `<div class="row" style="justify-content:space-between"><h1>${t("strategies")}</h1>${seg("ceiling", CEILINGS.map(c => [c, t("ceiling") + " " + c + "%"]), S.ceiling)}</div>`;
+  if (S.style === "A") return `${failBanner()}${head}<div class="panel tbl-wrap"><table><thead><tr><th>${t("strategies")}</th><th>${t("y1")}</th><th class="n">${t("d1")}</th><th class="n">${t("m1")}</th><th class="n">${t("ytd")}</th><th class="n">${t("sharpe")}</th><th class="n">${t("maxdd")}</th><th>${t("topHoldings")}</th></tr></thead><tbody>
+    ${data.map(x => `<tr class="click" data-go="detail-${x.s}"><td><span class="legend-sw" style="background:${SCOLOR[x.s]}"></span><b>${sn(x.s)}</b>${x.s === S.plan ? ` <span class="badge lock">${t("myPlan")}</span>` : ""}</td><td>${spark(x.r)}</td>
+      <td class="n ${cls(x.r.ret[li])}">${pct(x.r.ret[li], 2, true)}</td><td class="n ${cls(retBetween(x.r, idxBack(21), li))}">${pct(retBetween(x.r, idxBack(21), li), 1, true)}</td>
+      <td class="n ${cls(retBetween(x.r, ytdStart(), li))}">${pct(retBetween(x.r, ytdStart(), li), 1, true)}</td><td class="n">${num(x.m.sharpe)}</td><td class="n">${pct(-x.m.mdd)}</td>
+      <td>${x.top.map(([k, v]) => `<span class="chip">${k} ${pct(v, 0)}</span>`).join(" ")}</td></tr>`).join("")}</tbody></table></div>
+    <p class="muted" style="margin:0;font-size:.85rem">${t("since")} 2004-01-02 · ${t("dataAsOf")} ${DATA.manifest.dataDate}</p>`;
+  return `${failBanner()}${head}<div class="cards">${data.map(x => `<a class="card ${x.s === S.plan ? "hl" : ""}" href="#detail-${x.s}" style="text-decoration:none;color:inherit">
+    <div class="row" style="justify-content:space-between"><b>${sn(x.s)}</b>${x.s === S.plan ? `<span class="badge lock">${t("myPlan")}</span>` : ""}</div>
+    <div class="row" style="justify-content:space-between;align-items:end"><div><div class="label">${t("ytd")}</div><div class="big ${cls(retBetween(x.r, ytdStart(), li))}">${pct(retBetween(x.r, ytdStart(), li), 1, true)}</div></div>${spark(x.r, 252, 110, 40)}</div>
+    <div class="row muted" style="font-size:.82rem;gap:14px"><span>${t("d1")} <span class="num ${cls(x.r.ret[li])}">${pct(x.r.ret[li], 2, true)}</span></span><span>${t("sharpe")} <span class="num">${num(x.m.sharpe)}</span></span><span>${t("maxdd")} <span class="num">${pct(-x.m.mdd)}</span></span></div>
+    <div class="row" style="gap:6px">${x.top.map(([k, v]) => `<span class="chip">${k} ${pct(v, 0)}</span>`).join("")}</div></a>`).join("")}</div>`;
+}
+
+function pageDetail(s) {
+  const r = run(s), m = metrics(r), li = lastIdx();
+  const rangeSeg = seg("detailRange", Object.keys(I18N.zh.range).map(k => [k, t("range")[k]]), detailRange);
+  const mt = [[t("cagr"), pct(m.cagr)], [t("vol"), pct(m.vol)], [t("sharpe"), num(m.sharpe)], [t("maxdd"), pct(-m.mdd)], [t("calmar"), num(m.calmar)], [t("best"), pct(m.best, 2, true)], [t("worst"), pct(m.worst, 2, true)], [t("posDays"), pct(m.pos, 0)]];
+  const head = `${failBanner()}<div class="row" style="justify-content:space-between"><div class="stack" style="gap:4px"><a href="#strategies" class="muted" style="text-decoration:none">← ${t("strategies")}</a>
+    <h1><span class="legend-sw" style="background:${SCOLOR[s]};width:14px;height:14px"></span>${sn(s)}</h1><span class="muted">${t("strategyDesc")[s]}</span></div>
+    <div class="row">${seg("ceiling", CEILINGS.map(c => [c, c + "%"]), S.ceiling)}${s !== S.plan ? `<button class="btn" data-set="plan" data-v="${s}">★ ${t("myPlan")}</button>` : `<span class="badge lock">★ ${t("myPlan")}</span>`}</div></div>`;
+  const benchSel = `<label class="muted" style="font-size:.85rem">${t("benchmark")} <select data-set="bench">${[["", t("none")], ...STRATS.filter(x => x !== s).map(x => [x, sn(x)])].map(([v, l]) => `<option value="${v}" ${bench === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
+  const years = []; for (let y = 2004; y <= 2026; y++) years.push(y);
+  const calSel = `<select data-set="calYear">${years.reverse().map(y => `<option ${y === calYear ? "selected" : ""}>${y}</option>`).join("")}</select>`;
+  const live = `<div class="panel stack"><h3>${t("live")}</h3><p class="muted" style="margin:0;font-size:.85rem">${t("liveNote")}</p>
+    <div class="tbl-wrap"><table><thead><tr><th>${t("dataAsOf")}</th><th class="n">${t("d1")}</th><th>${t("change")}</th></tr></thead><tbody>
+    ${[0, 1, 2, 3, 4].map(k => { const i = li - k; const rb = r.rebal.find(x => x.t === i); return `<tr><td class="num">${iso(DATA.sessions[i])}</td><td class="n ${cls(r.ret[i])}">${pct(r.ret[i], 2, true)}</td><td>${rb ? rb.ch.map(c => UNIVERSE[c.i].t).join(", ") : `<span class="muted">${t("hold")}</span>`}</td></tr>`; }).join("")}
+    </tbody></table></div><span class="badge">${t("sample")}</span></div>`;
+  const monthly = monthlyTable(r);
+  if (S.style === "A") return `${head}<div class="row">${rangeSeg}${benchSel}</div>
+    <div class="grid2"><div class="panel"><h3>${t("equity")}</h3><div id="c-eq" class="chart"></div></div><div class="panel"><h3>${t("ddChart")}</h3><div id="c-dd" class="chart"></div></div>
+    <div class="panel"><h3>${t("daily")}</h3><div id="c-daily" class="chart"></div></div><div class="panel"><h3>${t("holdings")}</h3><div id="c-hold" class="chart"></div></div></div>
+    <div class="grid2"><div class="panel stack"><h3>${t("metrics")}</h3><table><tbody>${mt.map(([k, v]) => `<tr><td>${k}</td><td class="n">${v}</td></tr>`).join("")}</tbody></table></div>
+    <div class="panel stack"><div class="row" style="justify-content:space-between"><h3>${t("calendar")}</h3>${calSel}</div><div class="cal-wrap"><div id="c-cal" class="chart"></div></div></div></div>
+    <div class="panel stack"><h3>${t("monthly")}</h3>${monthly}</div>${live}`;
+  const tabs = [["equity", t("equity")], ["dd", t("ddChart")], ["daily", t("daily")], ["hold", t("holdings")], ["cal", t("calendar")]];
+  return `${head}<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">${mt.slice(0, 4).map(([k, v]) => `<div class="card"><span class="label">${k}</span><span class="big" style="font-size:1.25rem">${v}</span></div>`).join("")}</div>
+    <div class="panel stack"><div class="row" style="justify-content:space-between">${seg("detailTab", tabs, detailTab)}${detailTab === "cal" ? calSel : rangeSeg}</div>
+    ${detailTab === "equity" ? benchSel : ""}${detailTab === "cal" ? `<div class="cal-wrap"><div id="c-cal" class="chart"></div></div>` : `<div id="c-${detailTab === "equity" ? "eq" : detailTab}" class="chart lg"></div>`}</div>
+    <div class="panel stack"><h3>${t("monthly")}</h3>${monthly}</div>${live}`;
+}
+function monthlyTable(r) {
+  const S_ = DATA.sessions, map = {}; let prevEnd = r.eq[0], prevY = new Date(S_[0]).getUTCFullYear(), yStart = r.eq[0];
+  for (let i = 1; i < S_.length; i++) {
+    const d = new Date(S_[i]), nx = i + 1 < S_.length ? new Date(S_[i + 1]) : null;
+    if (!nx || nx.getUTCMonth() !== d.getUTCMonth()) { const y = d.getUTCFullYear(); (map[y] ||= {})[d.getUTCMonth()] = r.eq[i] / prevEnd - 1; prevEnd = r.eq[i]; if (!nx || nx.getUTCFullYear() !== y) { map[y].y = r.eq[i] / yStart - 1; yStart = r.eq[i]; } }
+  }
+  const ys = Object.keys(map).sort().reverse();
+  const cell = v => v == null ? `<td></td>` : `<td class="n" style="background:color-mix(in srgb, var(${v >= 0 ? "--up" : "--down"}) ${Math.min(60, Math.abs(v) * 900)}%, transparent)">${(v * 100).toFixed(1)}</td>`;
+  const mn = S.lang === "zh" ? [...Array(12)].map((_, k) => (k + 1) + "月") : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `<div class="tbl-wrap"><table style="font-size:.8rem"><thead><tr><th>${t("year")}</th>${mn.map(x => `<th class="n">${x}</th>`).join("")}<th class="n">${t("total")}</th></tr></thead><tbody>
+    ${ys.map(y => `<tr><td class="num">${y}</td>${[...Array(12)].map((_, k) => cell(map[y][k])).join("")}${cell(map[y].y)}</tr>`).join("")}</tbody></table></div>`;
+}
+function drawDetail(s) {
+  const r = run(s), a = rangeStart(detailRange), b = lastIdx(), X = dates(a, b);
+  const eqS = (rr, name, color) => ({ name, type: "line", showSymbol: false, sampling: "lttb", lineStyle: { width: 1.6, color }, itemStyle: { color }, data: Array.from(rr.eq.subarray(a, b + 1), v => +(v / rr.eq[a] * 10000).toFixed(0)) });
+  const ser = [eqS(r, sn(s), SCOLOR[s])]; if (bench && bench !== s) ser.push(eqS(run(bench), sn(bench), css("--muted")));
+  mk("c-eq", { legend: { top: 0, textStyle: { color: css("--muted") } }, grid: { left: 60, right: 16, top: 30, bottom: 30 }, xAxis: { type: "category", data: X }, yAxis: { type: "log", scale: true }, series: ser });
+  const dc = css("--down");
+  mk("c-dd", { xAxis: { type: "category", data: X }, yAxis: { type: "value", axisLabel: { formatter: v => v + "%" } },
+    series: [{ type: "line", showSymbol: false, sampling: "lttb", lineStyle: { width: 1, color: dc }, areaStyle: { color: dc, opacity: .25 }, data: Array.from(r.dd.subarray(a, b + 1), v => -(v * 100).toFixed(2)),
+      markLine: { symbol: "none", label: { formatter: t("ceiling") + " " + S.ceiling + "%", color: css("--warn") }, lineStyle: { color: css("--warn"), type: "dashed" }, data: [{ yAxis: -S.ceiling }] } }] });
+  const da = detailRange === "ALL" || detailRange === "5Y" ? idxBack(252) : a;
+  mk("c-daily", { xAxis: { type: "category", data: dates(da, b) }, yAxis: { type: "value", axisLabel: { formatter: v => v + "%" } }, grid: { left: 52, right: 16, top: 16, bottom: 56 },
+    dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 8 }],
+    series: [{ type: "bar", data: Array.from(r.ret.subarray(da, b + 1), v => ({ value: +(v * 100).toFixed(2), itemStyle: { color: v >= 0 ? css("--up") : css("--down") } })) }] });
+  const A = UNIVERSE.length, step = Math.max(1, Math.round((b - a) / 300)), idx = []; for (let i = a; i <= b; i += step) idx.push(i);
+  const used = UNIVERSE.map((u, i) => i).filter(i => idx.some(k => r.W[k * (A + 1) + i + 1] > .01));
+  mk("c-hold", { tooltip: { trigger: "axis", valueFormatter: v => v + "%" }, xAxis: { type: "category", data: idx.map(i => iso(DATA.sessions[i])) }, yAxis: { type: "value", max: 100, axisLabel: { formatter: v => v + "%" } },
+    series: [{ name: t("cash"), type: "line", stack: "w", showSymbol: false, lineStyle: { width: 0 }, areaStyle: { color: css("--surface-2") }, data: idx.map(k => +(r.W[k * (A + 1)] * 100).toFixed(1)) },
+      ...used.map(i => ({ name: UNIVERSE[i].t, type: "line", stack: "w", showSymbol: false, lineStyle: { width: 0 }, areaStyle: { color: assetColor(i) }, itemStyle: { color: assetColor(i) }, data: idx.map(k => +(r.W[k * (A + 1) + i + 1] * 100).toFixed(1)) }))] });
+  const cal = []; DATA.sessions.forEach((d, i) => { if (i && new Date(d).getUTCFullYear() === calYear) cal.push([iso(d), +(r.ret[i] * 100).toFixed(2)]); });
+  mk("c-cal", { tooltip: { formatter: p => p.value[0] + "  " + p.value[1] + "%" }, grid: undefined,
+    visualMap: { show: false, type: "piecewise", pieces: [{ lt: -1.5, color: css("--down") }, { gte: -1.5, lt: -.3, color: alpha(css("--down"), .45) }, { gte: -.3, lt: .3, color: css("--surface-2") }, { gte: .3, lt: 1.5, color: alpha(css("--up"), .45) }, { gte: 1.5, color: css("--up") }] },
+    calendar: { range: String(calYear), top: 24, left: 36, right: 8, cellSize: ["auto", 16], itemStyle: { borderColor: css("--surface"), borderWidth: 2, color: css("--bg") }, splitLine: { show: false }, yearLabel: { show: false }, dayLabel: { color: css("--muted"), nameMap: S.lang === "zh" ? "ZH" : "EN" }, monthLabel: { color: css("--muted"), nameMap: S.lang === "zh" ? "ZH" : "EN" } },
+    series: [{ type: "heatmap", coordinateSystem: "calendar", data: cal }] });
+}
+function drawDonut() {
+  const r = run(S.plan), w = weightsAt(r, lastIdx());
+  const d = UNIVERSE.map((u, i) => ({ name: u.t, value: +(w[i + 1] * 100).toFixed(1), itemStyle: { color: assetColor(i) } })).filter(x => x.value > 0);
+  if (w[0] > .001) d.push({ name: t("cash"), value: +(w[0] * 100).toFixed(1), itemStyle: { color: css("--surface-2") } });
+  mk("c-donut", { tooltip: { trigger: "item", formatter: "{b}: {c}%" }, series: [{ type: "pie", radius: ["55%", "85%"], label: { color: css("--fg"), formatter: "{b}\n{c}%" }, itemStyle: { borderColor: css("--surface"), borderWidth: 2 }, data: d }] });
+}
+
+function pageCompare() {
+  const rs = seg("cmpRange", Object.keys(I18N.zh.range).map(k => [k, t("range")[k]]), cmpRange);
+  return `${failBanner()}<div class="row" style="justify-content:space-between"><h1>${t("compare")}</h1>${seg("ceiling", CEILINGS.map(c => [c, t("ceiling") + " " + c + "%"]), S.ceiling)}</div>
+    <div class="panel stack"><span class="label">${t("pickStrategies")}</span><div class="row">${STRATS.map(s => `<label class="chip" style="cursor:pointer;font-family:var(--f-body)"><input type="checkbox" data-cmp="${s}" ${compareSel.includes(s) ? "checked" : ""}> <span class="legend-sw" style="background:${SCOLOR[s]}"></span>${sn(s)}</label>`).join("")}</div>${rs}</div>
+    <div class="panel"><h3>${t("equity")}</h3><div id="c-ceq" class="chart lg"></div></div>
+    <div class="grid2"><div class="panel"><h3>${t("ddChart")}</h3><div id="c-cdd" class="chart"></div></div><div class="panel"><h3>${t("rolling")}</h3><div id="c-crs" class="chart"></div></div></div>
+    <div class="panel tbl-wrap"><table><thead><tr><th></th><th class="n">${t("cagr")}</th><th class="n">${t("vol")}</th><th class="n">${t("sharpe")}</th><th class="n">${t("maxdd")}</th><th class="n">${t("calmar")}</th></tr></thead><tbody>
+    ${compareSel.map(s => { const m = metrics(run(s), rangeStart(cmpRange)); return `<tr><td><span class="legend-sw" style="background:${SCOLOR[s]}"></span>${sn(s)}</td><td class="n">${pct(m.cagr)}</td><td class="n">${pct(m.vol)}</td><td class="n">${num(m.sharpe)}</td><td class="n">${pct(-m.mdd)}</td><td class="n">${num(m.calmar)}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+function drawCompare() {
+  const a = rangeStart(cmpRange), b = lastIdx(), X = dates(a, b);
+  const L = { legend: { top: 0, textStyle: { color: css("--muted") } }, grid: { left: 56, right: 16, top: 30, bottom: 30 } };
+  mk("c-ceq", { ...L, xAxis: { type: "category", data: X }, yAxis: { type: "value", scale: true }, series: compareSel.map(s => { const r = run(s); return { name: sn(s), type: "line", showSymbol: false, sampling: "lttb", lineStyle: { width: 1.5, color: SCOLOR[s] }, itemStyle: { color: SCOLOR[s] }, data: Array.from(r.eq.subarray(a, b + 1), v => +(v / r.eq[a] * 10000).toFixed(0)) }; }) });
+  mk("c-cdd", { ...L, xAxis: { type: "category", data: X }, yAxis: { type: "value", axisLabel: { formatter: v => v + "%" } }, series: compareSel.map(s => ({ name: sn(s), type: "line", showSymbol: false, sampling: "lttb", lineStyle: { width: 1.2, color: SCOLOR[s] }, itemStyle: { color: SCOLOR[s] }, data: Array.from(run(s).dd.subarray(a, b + 1), v => -(v * 100).toFixed(2)) })) });
+  const a2 = Math.max(a, 252);
+  mk("c-crs", { ...L, xAxis: { type: "category", data: dates(a2, b) }, yAxis: { type: "value" }, series: compareSel.map(s => {
+    const r = run(s), out = []; let s1 = 0, s2 = 0; for (let i = a2 - 251; i <= a2; i++) { s1 += r.ret[i]; s2 += r.ret[i] ** 2; }
+    for (let i = a2; i <= b; i++) { if (i > a2) { s1 += r.ret[i] - r.ret[i - 252]; s2 += r.ret[i] ** 2 - r.ret[i - 252] ** 2; } const mu = s1 / 252, sd = Math.sqrt(Math.max(s2 / 252 - mu * mu, 1e-12)); out.push(+(mu / sd * Math.sqrt(252)).toFixed(2)); }
+    return { name: sn(s), type: "line", showSymbol: false, sampling: "lttb", lineStyle: { width: 1.2, color: SCOLOR[s] }, itemStyle: { color: SCOLOR[s] }, data: out };
+  }) });
+}
+
+function pageSettings() {
+  const opt = (v, l, cur) => `<option value="${v}" ${String(v) === String(cur) ? "selected" : ""}>${l}</option>`;
+  return `<h1>${t("settings")}</h1><p class="muted" style="margin:0">${t("privacy")}</p>
+  <div class="panel form">
+    <div class="field"><label for="f-plan">${t("planStrategy")}</label><select id="f-plan" data-set="plan">${STRATS.map(s => opt(s, sn(s), S.plan)).join("")}</select></div>
+    <div class="field"><span class="label2">${t("ceiling")}</span>${seg("ceiling", CEILINGS.map(c => [c, c + "%"]), S.ceiling)}</div>
+    <div class="field"><span class="label2">${t("holdingsMode")}</span>${seg("mode", [["sim", t("modeSim")], ["real", t("modeReal")]], S.mode)}</div>
+    ${S.mode === "sim" ? `<div class="field"><label for="f-amount">${t("amount")} (USD)</label><input id="f-amount" type="number" min="0" step="1000" value="${S.amount}" data-set="amount"><span class="hint">${t("amountHint")}</span></div>`
+      : `<div class="field"><label for="f-cash">${t("cash")} (USD)</label><input id="f-cash" type="number" min="0" step="100" value="${S.cash}" data-set="cash"><span class="hint">${t("cashHint")}</span></div>
+      <div class="field"><span class="label2">${t("realHoldings")}</span><span class="hint">${t("realHint")}</span>
+        ${S.holdings.map((h, k) => `<div class="hold-row"><select id="h-t-${k}" data-h="${k}" data-k="t">${UNIVERSE.map(u => opt(u.t, u.t + " · " + un(u), h.t)).join("")}</select>
+          <input id="h-s-${k}" type="number" min="0" value="${h.sh}" data-h="${k}" data-k="sh" aria-label="${t("shares")}"><input id="h-d-${k}" type="date" value="${h.d}" data-h="${k}" data-k="d" aria-label="date">
+          <button class="btn" data-hrm="${k}">${t("remove")}</button></div>`).join("")}
+        <div><button class="btn" data-hadd="1">+ ${t("addRow")}</button></div></div>
+      <div class="field"><label for="f-peak">${t("peak")}</label><input id="f-peak" type="number" min="0" value="${S.peak}" data-set="peak"><span class="hint">${t("peakHint")}</span></div>`}
+  </div>
+  <div class="panel form">
+    <div class="field"><span class="label2">${t("language")}</span>${seg("lang", [["zh", "中文"], ["en", "English"]], S.lang)}</div>
+    <div class="field"><span class="label2">${t("theme")}</span>${seg("theme", [["system", t("system")], ["light", t("light")], ["dark", t("dark")]], S.theme)}</div>
+    <div class="field"><span class="label2">${t("colors")}</span>${seg("updown", [["red-up", t("redUp")], ["green-up", t("greenUp")]], S.updown)}</div>
+  </div>
+  <div class="panel form"><div class="field"><span class="label2">${t("backup")}</span><span class="hint">${t("backupHint")}</span>
+    <textarea id="f-backup" spellcheck="false">${JSON.stringify({ plan: S.plan, ceiling: S.ceiling, mode: S.mode, amount: S.amount, cash: S.cash, holdings: S.holdings, lang: S.lang, theme: S.theme, updown: S.updown })}</textarea>
+    <div class="row"><button class="btn" id="b-copy">${t("copy")}</button><button class="btn primary" id="b-import">${t("importBtn")}</button><span id="b-msg" class="muted"></span></div></div></div>`;
+}
+
+function pageAbout() {
+  const m = DATA.manifest;
+  return `<h1>${t("about")}</h1>
+  <div class="panel stack"><h2>${t("aboutStrategies")}</h2><table><tbody>${STRATS.map(s => `<tr><td style="white-space:normal"><span class="legend-sw" style="background:${SCOLOR[s]}"></span><b>${sn(s)}</b></td><td style="white-space:normal">${t("strategyDesc")[s]}</td></tr>`).join("")}</tbody></table></div>
+  <div class="grid2"><div class="panel stack"><h2>${t("rules")}</h2><p style="margin:0">${t("rulesText")}</p></div>
+  <div class="panel stack"><h2>${t("dataSources")}</h2><p style="margin:0">${t("dataText")}</p></div></div>
+  <div class="panel stack"><h2>${t("pipeline")}</h2><table><tbody>
+    <tr><td>${t("status")}</td><td>${m.status === "ok" ? `<span class="badge ok">${t("success")}</span>` : `<span class="badge bad">${t("failed")} · ${m.failedAt}</span>`}</td></tr>
+    <tr><td>${t("dataAsOf")}</td><td class="num">${m.dataDate}</td></tr><tr><td>${t("lastRun")}</td><td class="num">${m.generatedAt}</td></tr>
+    <tr><td>${t("nextRun")}</td><td class="num">${m.nextRun}</td></tr><tr><td>Code</td><td class="num">${m.code}</td></tr><tr><td>Config</td><td class="num">${m.config}</td></tr></tbody></table></div>
+  <div class="alert">${t("disclaimer")}</div>`;
+}
+
+/* ============================================================ shell */
+function route() { const h = (location.hash || "#today").slice(1); return h; }
+function render() {
+  charts.forEach(c => c.dispose()); charts = [];
+  const root = document.documentElement;
+  if (S.theme === "system") delete root.dataset.theme; else root.dataset.theme = S.theme;
+  root.dataset.updown = S.updown; root.lang = S.lang === "zh" ? "zh-CN" : "en";
+  root.dataset.dark = (S.theme === "dark" || (S.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)) ? "1" : "0";
+  document.getElementById("mockbar").innerHTML = `<span><b>${t("mockup")}</b> · ${t("fakeData")}</span>
+    <span>${t("style")} ${seg("style", [["A", t("styleA")], ["B", t("styleB")]], S.style)}</span>
+    <label><input type="checkbox" id="f-fail" ${S.failed ? "checked" : ""}> ${t("simFail")}</label>
+    <span>${seg("lang", [["zh", "中文"], ["en", "EN"]], S.lang)}</span>`;
+  const r = route(), base = r.startsWith("detail-") ? "strategies" : r;
+  const links = ROUTES.map(k => `<a href="#${k}" ${k === base ? 'aria-current="page"' : ""}>${t(k)}</a>`).join("");
+  document.getElementById("tabs").innerHTML = links;
+  document.getElementById("btabs").innerHTML = ROUTES.map(k => `<a href="#${k}" ${k === base ? 'aria-current="page"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[k]}</svg>${t(k)}</a>`).join("");
+  document.getElementById("topmeta").innerHTML = freshness();
+  const app = document.getElementById("app");
+  if (r.startsWith("detail-") && STRATS.includes(r.slice(7))) { app.innerHTML = pageDetail(r.slice(7)); drawDetail(r.slice(7)); }
+  else if (r === "strategies") app.innerHTML = pageStrategies();
+  else if (r === "compare") { app.innerHTML = pageCompare(); drawCompare(); }
+  else if (r === "settings") app.innerHTML = pageSettings();
+  else if (r === "about") app.innerHTML = pageAbout();
+  else { app.innerHTML = pageToday(); if (S.style === "B" && S.mode === "sim") drawDonut(); }
+}
+const VIEW = { detailRange: v => detailRange = v, detailTab: v => detailTab = v, bench: v => bench = v, calYear: v => calYear = +v, cmpRange: v => cmpRange = v };
+function setKey(k, v) {
+  if (VIEW[k]) { VIEW[k](v); render(); return; }
+  if (["ceiling", "amount", "cash"].includes(k)) v = +v;
+  S[k] = v; save(); render();
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("button[data-set]"); if (b) { setKey(b.dataset.set, b.dataset.v); return; }
+  const tr = e.target.closest("tr[data-go]"); if (tr) { location.hash = tr.dataset.go; return; }
+  const rm = e.target.closest("[data-hrm]"); if (rm) { S.holdings.splice(+rm.dataset.hrm, 1); save(); render(); return; }
+  if (e.target.closest("[data-hadd]")) { S.holdings.push({ t: "IEF", sh: 0, d: iso(DATA.sessions[lastIdx()]) }); save(); render(); return; }
+  if (e.target.id === "b-copy") { const ta = document.getElementById("f-backup"), msg = document.getElementById("b-msg");
+    navigator.clipboard?.writeText(ta.value).then(() => msg.textContent = t("copied"), () => { ta.select(); }); if (!navigator.clipboard) ta.select(); return; }
+  if (e.target.id === "b-import") { const msg = document.getElementById("b-msg"); try { const x = JSON.parse(document.getElementById("f-backup").value); if (typeof x !== "object" || !x) throw 0; S = { ...S, ...x }; save(); render(); document.getElementById("b-msg").textContent = t("imported"); } catch (_) { msg.textContent = t("badJson"); } }
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.id === "f-fail") { S.failed = el.checked; save(); DATA = generate(S.failed); render(); return; }
+  if (el.dataset.cmp) { const s = el.dataset.cmp; compareSel = el.checked ? STRATS.filter(x => x === s || compareSel.includes(x)) : compareSel.filter(x => x !== s); render(); return; }
+  if (el.dataset.h !== undefined) { const h = S.holdings[+el.dataset.h]; h[el.dataset.k] = el.dataset.k === "sh" ? +el.value : el.value; save(); return; }
+  if (el.dataset.set) setKey(el.dataset.set, el.value);
+});
+window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", render);
+render();
+</script>
