@@ -230,3 +230,5 @@ __marimo__/
 
 # Web app fake data (regenerate with scripts.fake_site_data)
 webapp/fake_data*/
+site_data/
+site_data.tmp/

@@ -18,6 +18,7 @@ SCHEMA_VERSION = 1
 CASH = "CASH"
 TRADING_DAYS = 252
 W_DECIMALS = 4          # weights
+MIN_CHANGE = 0.001      # smallest weight change published as a trade (0.1 percentage point)
 EQ_DIGITS = 6           # significant digits of the equity curve
 RISK_STATES = ("normal", "over_budget", "capital_preservation")
 
@@ -70,7 +71,10 @@ class PortfolioPath:
     rebalances: list[Rebalance] = field(default_factory=list)
     locks: dict[str, dt.date] = field(default_factory=dict)   # held ticker -> first legal sell session
     drawdown: float = 0.0           # as the risk layer measures it at data_date
-    risk_state: str = "normal"
+    risk_state: str = "normal"      # of the planned decision
+    #: The decision taken at the final close, for the next open (1 + n_assets, CASH first).
+    #: None means "hold the current book".
+    target: np.ndarray | None = None
 
     @property
     def id(self) -> str:
@@ -142,6 +146,22 @@ def weight_dict(row: np.ndarray, assets: Sequence[str]) -> dict[str, float]:
     return out
 
 
+def trades(before: np.ndarray, after: np.ndarray, assets: Sequence[str],
+           min_change: float = MIN_CHANGE) -> list[Change]:
+    """Per-ETF weight changes of at least `min_change` (cash is the residual, not a trade)."""
+    return [Change(t, float(before[j + 1]), float(after[j + 1])) for j, t in enumerate(assets)
+            if abs(after[j + 1] - before[j + 1]) >= min_change]
+
+
+def round_row(row: Sequence[float]) -> list[float]:
+    """Round weights, folding the rounding residue into the largest so the row sums to 1."""
+    out = [round(max(float(x), 0.0), W_DECIMALS) for x in row]
+    if out:
+        k = max(range(len(out)), key=out.__getitem__)
+        out[k] = round(out[k] + 1.0 - sum(out), W_DECIMALS)
+    return out
+
+
 def weekly_sample(dates: Sequence[dt.date]) -> list[int]:
     """Index of the last session of each ISO week, plus the final session."""
     idx = [i for i in range(len(dates) - 1) if dates[i].isocalendar()[:2] != dates[i + 1].isocalendar()[:2]]
@@ -166,7 +186,7 @@ def backtest_doc(p: PortfolioPath) -> dict:
         "weights": {
             "assets": [names[j] for j in held],
             "dates": [iso(p.dates[i]) for i in sample],
-            "values": [[_r(max(p.weights[i, j], 0.0), W_DECIMALS) for j in held] for i in sample],
+            "values": [round_row([p.weights[i, j] for j in held]) for i in sample],
         },
         "rebalances": [rb.doc() for rb in p.rebalances],
         "metrics": metrics(eq),
@@ -180,12 +200,18 @@ def today_entry(p: PortfolioPath) -> dict:
     last = p.rebalances[-1] if p.rebalances else None
     if p.risk_state not in RISK_STATES:
         raise ValueError(f"unknown risk_state {p.risk_state!r}")
+    current = np.asarray(p.weights[-1], dtype=float)
+    plan = current if p.target is None else np.asarray(p.target, dtype=float)
+    held = weight_dict(current, p.assets)
     return {
         "strategy": p.strategy, "ceiling": p.ceiling,
-        "weights": weight_dict(p.weights[-1], p.assets),
+        "weights": weight_dict(plan, p.assets),
+        "current_weights": held,
+        "next_trades": [c.doc() for c in trades(current, plan, p.assets)],
         "drawdown": _r(min(max(p.drawdown, 0.0), 1.0)),
         "risk_state": p.risk_state,
-        "locks": {t: iso(d) for t, d in sorted(p.locks.items()) if d > p.dates[-1]},
+        # A position too small to survive rounding is not shown, so neither is its lock.
+        "locks": {t: iso(d) for t, d in sorted(p.locks.items()) if d > p.dates[-1] and t in held},
         "returns": period_returns(p.dates, eq),
         "last_rebalance": last.doc() if last else None,
         "traded_today": bool(last and last.date == p.dates[-1]),

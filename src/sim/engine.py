@@ -17,6 +17,7 @@ So the body lives here, exactly once:
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -42,9 +43,12 @@ class EngineState:
     ledger: Ledger
     lock_manager: LockManager
     peak: float
+    #: Close NAVs of the last `cfg.peak_window` sessions; None unless the peak is rolling.
+    navs: deque | None = None
 
     def copy(self) -> "EngineState":
-        return EngineState(self.ledger.copy(), self.lock_manager.copy(), float(self.peak))
+        return EngineState(self.ledger.copy(), self.lock_manager.copy(), float(self.peak),
+                           None if self.navs is None else deque(self.navs, self.navs.maxlen))
 
 
 @dataclass
@@ -196,8 +200,7 @@ def advance(
 
     next_closes = market.prices_at(nxt, "close_raw")
     divs = {t: float(market.div_per_share[nxt, j]) for j, t in enumerate(universe)}
-    val = value(st.ledger, next_closes, peak=st.peak, div_per_share=divs)
-    st.peak = val.peak
+    val = _mark(st, cfg, next_closes, divs)
     reward = float(np.log(val.nav / dec.nav))
 
     row = _trajectory_row(
@@ -208,6 +211,28 @@ def advance(
     return Outcome(row=row, reward=reward, nav=val.nav,
                    lock_violations=n_lock_violations, diagnostics=diag,
                    projected=projected.weights)
+
+
+def plan_next(market: MarketData, st: EngineState, cfg: SimulationConfig, i: int,
+              weight_fn, projector: FeasibilityProjector, *,
+              envelope: RiskEnvelope | None = None):
+    """The decision at session `i`'s close, projected but NOT executed.
+
+    A simulation's last row is the book at the final close; the decision taken at that
+    close executes at the next open, which has not happened yet. The web app publishes
+    exactly that pending decision as "today's plan". Returns `(decision, projected)`; a
+    strategy that holds (returns None) is planned as its current weights. Mutates nothing
+    but the peak bookkeeping `observe` always does.
+    """
+    dec = observe(market, st, cfg, i, envelope=envelope)
+    proposal = weight_fn(market.sessions[i], dec.ctx)
+    a_raw = np.asarray(dec.ctx.current_weights if proposal is None else proposal, dtype=float)
+    projected = projector.project(
+        a_raw, lower_bounds=dec.lower_w, available=dec.avail_full, risk=dec.risk_model,
+        capital_preservation=dec.capital_preservation,
+        current_weights=dec.ctx.current_weights,
+    )
+    return dec, projected
 
 
 def hold(market: MarketData, st: EngineState, cfg: SimulationConfig, i: int,
@@ -225,8 +250,7 @@ def hold(market: MarketData, st: EngineState, cfg: SimulationConfig, i: int,
     universe = market.universe
     next_closes = market.prices_at(nxt, "close_raw")
     divs = {t: float(market.div_per_share[nxt, j]) for j, t in enumerate(universe)}
-    val = value(st.ledger, next_closes, peak=st.peak, div_per_share=divs)
-    st.peak = val.peak
+    val = _mark(st, cfg, next_closes, divs)
     reward = float(np.log(val.nav / dec.nav))
     cur = np.asarray(dec.ctx.current_weights, dtype=float)
     row = _trajectory_row(
@@ -343,6 +367,19 @@ def reservoir_entry(market: MarketData, st: EngineState, cfg: SimulationConfig,
     }
 
 
+def _mark(st: EngineState, cfg: SimulationConfig, closes: dict, divs: dict):
+    """Value the book at a close and roll the drawdown peak forward."""
+    if not cfg.peak_window:
+        val = value(st.ledger, closes, peak=st.peak, div_per_share=divs)
+    else:
+        # The window after this close is appended: the newest W - 1 earlier closes.
+        keep = list(st.navs)[1:] if len(st.navs) == st.navs.maxlen else list(st.navs)
+        val = value(st.ledger, closes, peak=max(keep, default=0.0), div_per_share=divs)
+        st.navs.append(val.nav)
+    st.peak = val.peak
+    return val
+
+
 def initial_state(market: MarketData, cfg: SimulationConfig, *,
                   ledger: Ledger | None = None,
                   lock_manager: LockManager | None = None,
@@ -360,5 +397,10 @@ def initial_state(market: MarketData, cfg: SimulationConfig, *,
                                       scope=cfg.lock_scope)).copy()
     first = market.prices_at(row)
     nav0 = led.cash + sum(led.get(t) * first.get(t, 0.0) for t in market.universe)
+    if cfg.peak_window:
+        if peak is not None:
+            raise ValueError("an inherited peak is not defined for a rolling peak window")
+        return EngineState(ledger=led, lock_manager=lm, peak=nav0,
+                           navs=deque([nav0], maxlen=int(cfg.peak_window)))
     return EngineState(ledger=led, lock_manager=lm,
                        peak=max(float(peak if peak is not None else nav0), nav0))

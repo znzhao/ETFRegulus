@@ -1,0 +1,6 @@
+# The web app's rule set (WEBAPP_PLAN.md Step 3): the main-line D-F risk rule, with drawdown
+# measured from the highest NAV of the past 12 months (252 sessions) instead of all time.
+extends: redesign_df.yaml
+
+drawdown:
+  peak_window_sessions: 252

@@ -404,3 +404,13 @@ built yet.
    configuration; full Stages 9–12 on the final checkpoint of each campaign; **no source-code
    edits while a training session is running** (a session that lazily imports newer code crashes
    at its next evaluation -- it happened on 2026-10-09).
+5. **Finding from the web app work (2026-10-10): baseline "holds" trade daily.** Between
+   rebalances the baselines return the current weights (`strategies._hold`), and the engine
+   executes weights at the next open, so overnight moves become small daily trades that relock
+   each ETF. Momentum (D-F, 5%, 2004-2026) traded on 3,256 of 5,702 sessions; routing holds
+   through `engine.hold` instead cut that to 214 and raised its Sharpe from 0.38 to 0.57. The user
+   called the daily trading unintended. The web app uses the fix (`src/publish/pipeline.py`,
+   `true_hold`); the research simulator does not yet. Decide before the next comparison against
+   baselines whether to make `_hold` return None in the research too. That would change the
+   baseline numbers in every report, including the constrained 60/40 bar of 1.14. O-2 (step 1)
+   must also cover hold sessions past the ceiling. See `WEBAPP_PLAN.md` Step 3.

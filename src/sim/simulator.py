@@ -142,6 +142,12 @@ class SimulationConfig:
     #: Snapshot a reachable state every N steps into the initial-state reservoir.
     #: 0 disables. See reference/env-mdp.md section 5, Approach A.
     reservoir_every: int = 0
+    #: Where drawdown is measured from. 0 (the research default): the running maximum NAV
+    #: since the start, never reset. W > 0: the highest close NAV over the last W sessions,
+    #: the current one included -- the web app uses 252, "the past 12 months", because on a
+    #: multi-decade path a never-reset peak leaves a strategy in capital preservation for
+    #: good after its first deep drawdown (WEBAPP_PLAN.md Step 3).
+    peak_window: int = 0
 
 
 @dataclass
@@ -154,6 +160,9 @@ class SimulationResult:
     #: entry was produced by a legal trajectory through this very simulator, which is
     #: what makes it reachable without any verification step.
     reservoir: list[dict] = field(default_factory=list)
+    #: The engine state after the last row (ledger, locks, peak), for planning the next
+    #: decision without executing it (`src.sim.engine.plan_next`).
+    final_state: object = None
 
 
 def simulate(
@@ -223,7 +232,7 @@ def simulate(
     trajectory = pd.DataFrame(rows).set_index("session")
     return SimulationResult(
         trajectory=trajectory, final_ledger=st.ledger, final_lock_manager=st.lock_manager,
-        reservoir=reservoir,
+        reservoir=reservoir, final_state=st,
         diagnostics={
             "n_steps": len(rows),
             "lock_violations": n_lock_violations,
