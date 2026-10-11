@@ -37,26 +37,26 @@ TICKERS: dict[str, tuple[str, str]] = {
 STRATEGIES: dict[str, dict] = {
     "spy_tlt_60_40": {
         "name": ("60/40 股债", "60/40 SPY-TLT"),
-        "description": ("60% 标普 500（SPY）+ 40% 长期美债（TLT），每月再平衡。",
-                        "60% S&P 500 (SPY) and 40% long Treasuries (TLT), rebalanced monthly."),
+        "description": ("60% 标普 500（SPY）+ 40% 长期美债（TLT）。每月末检查，偏离目标超过 5 个百分点才再平衡。",
+                        "60% S&P 500 (SPY) and 40% long Treasuries (TLT). Checked at each month-end; rebalanced only when a weight drifts more than 5 points from target."),
         "color": "#7a5bb5",
     },
     "momentum": {
         "name": ("动量", "Momentum"),
-        "description": ("定期买入过去一段时间涨得最好的几只 ETF。",
-                        "Periodically buys the ETFs with the strongest recent returns."),
+        "description": ("每月末买入过去 12 个月（不含最近 1 个月）涨幅最大的 5 只 ETF，各 20%；涨幅为负的不买，空位留作现金。",
+                        "At each month-end, buys the 5 ETFs with the best 12-month return excluding the latest month, 20% each; ETFs with a negative return are skipped and their slot stays in cash."),
         "color": "#2a9d8f",
     },
     "classical_optimizer": {
         "name": ("经典优化器", "Classical optimizer"),
-        "description": ("用历史收益和波动做均值方差优化来分配。",
-                        "Allocates by mean-variance optimization on historical returns and risk."),
+        "description": ("风险平价：每月末按过去一年波动率的倒数分配，波动越小配得越多，每只最多 25%。",
+                        "Risk parity: at each month-end, weights by the inverse of each ETF's past-year volatility (calmer ETFs get more), at most 25% each."),
         "color": "#c4567a",
     },
     "equal_weight": {
         "name": ("等权", "Equal weight"),
-        "description": ("把资金平均分给所有可交易的 ETF，定期再平衡。",
-                        "Splits capital equally across every tradable ETF, rebalanced periodically."),
+        "description": ("把资金平均分给所有可交易的 ETF。每月末检查，偏离目标超过 5 个百分点才再平衡。",
+                        "Splits capital equally across every tradable ETF. Checked at each month-end; rebalanced only when a weight drifts more than 5 points from target."),
         "color": "#d08a2e",
     },
     "spy_buy_hold": {
