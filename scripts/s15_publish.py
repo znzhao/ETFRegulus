@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from src.publish import contract, pipeline
+from src.publish import contract, live, pipeline
 
 
 def write(docs: dict[str, dict], out: Path) -> None:
@@ -37,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--end", default=None, help="last session to use (default: all curated data)")
     ap.add_argument("--only", default=None, help="comma-separated strategies (default: all six)")
     ap.add_argument("--ceilings", default=",".join(map(str, pipeline.CEILINGS)))
+    ap.add_argument("--log-dir", type=Path, default=None,
+                    help="append-only live log (WEBAPP_PLAN.md Step 4); appended only once the output is valid")
     a = ap.parse_args(argv)
 
     settings = pipeline.Settings(
@@ -45,6 +47,15 @@ def main(argv: list[str] | None = None) -> int:
         strategies=tuple(a.only.split(",")) if a.only else pipeline.Settings.strategies)
     t0 = time.time()
     docs = pipeline.build_site(settings)
+
+    new_line = None
+    if a.log_dir is not None:
+        lines = live.read_log(a.log_dir)
+        line = live.line_from_today(docs["today.json"])
+        if live.is_new(lines, line):
+            new_line, lines = line, lines + [line]
+        man = docs["manifest.json"]
+        docs[man["files"]["live"]] = live.live_doc(lines, man["portfolios"])
 
     tmp = a.out.with_name(a.out.name + ".tmp")
     if tmp.exists():
@@ -59,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.out.exists():
         shutil.rmtree(a.out)
     tmp.rename(a.out)
+    if new_line is not None:
+        print(f"live log: appended {new_line['date']} -> {live.append(a.log_dir, new_line)}")
     size = sum(f.stat().st_size for f in a.out.rglob("*.json"))
     print(f"wrote {a.out} ({size / 1e6:.1f} MB, {len(docs)} files) in {time.time() - t0:.0f}s: valid")
     return 0

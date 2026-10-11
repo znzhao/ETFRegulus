@@ -162,6 +162,16 @@ def round_row(row: Sequence[float]) -> list[float]:
     return out
 
 
+def spark(dates: Sequence[dt.date], equity: np.ndarray, sessions: int = TRADING_DAYS) -> list[float]:
+    """Weekly points over the last `sessions`, scaled to 1 at the first."""
+    lo = max(0, len(dates) - sessions - 1)
+    idx = [i for i in weekly_sample(dates) if i >= lo]
+    if idx[0] != lo:
+        idx.insert(0, lo)
+    idx = idx[-60:]
+    return [_sig(equity[i] / equity[idx[0]], 5) for i in idx]
+
+
 def weekly_sample(dates: Sequence[dt.date]) -> list[int]:
     """Index of the last session of each ISO week, plus the final session."""
     idx = [i for i in range(len(dates) - 1) if dates[i].isocalendar()[:2] != dates[i + 1].isocalendar()[:2]]
@@ -213,6 +223,8 @@ def today_entry(p: PortfolioPath) -> dict:
         # A position too small to survive rounding is not shown, so neither is its lock.
         "locks": {t: iso(d) for t, d in sorted(p.locks.items()) if d > p.dates[-1] and t in held},
         "returns": period_returns(p.dates, eq),
+        "summary": {k: v for k, v in metrics(eq).items() if k in ("cagr", "sharpe", "max_drawdown")},
+        "spark": spark(p.dates, eq),
         "last_rebalance": last.doc() if last else None,
         "traded_today": bool(last and last.date == p.dates[-1]),
     }

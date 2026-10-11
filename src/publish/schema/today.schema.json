@@ -33,7 +33,7 @@
     "portfolio": {
       "type": "object", "additionalProperties": false,
       "required": ["strategy", "ceiling", "weights", "current_weights", "next_trades", "drawdown",
-                   "risk_state", "locks", "returns", "last_rebalance", "traded_today"],
+                   "risk_state", "locks", "returns", "summary", "spark", "last_rebalance", "traded_today"],
       "properties": {
         "strategy": {"type": "string", "pattern": "^[a-z0-9_]+$"},
         "ceiling": {"type": "integer", "minimum": 1, "maximum": 100},
@@ -52,6 +52,14 @@
           "properties": {"d1": {"$ref": "#/$defs/ret"}, "m1": {"$ref": "#/$defs/ret"},
                          "ytd": {"$ref": "#/$defs/ret"}, "y1": {"$ref": "#/$defs/ret"}}
         },
+        "summary": {
+          "type": "object", "additionalProperties": false, "required": ["cagr", "sharpe", "max_drawdown"],
+          "description": "Full-backtest metrics, so the overview needs no backtest file.",
+          "properties": {"cagr": {"type": "number"}, "sharpe": {"type": "number"},
+                         "max_drawdown": {"type": "number", "minimum": 0, "maximum": 1}}
+        },
+        "spark": {"type": "array", "minItems": 2, "maxItems": 60, "items": {"type": "number", "exclusiveMinimum": 0},
+                  "description": "Equity over the last year at each week's last session, scaled to 1 at the first point."},
         "last_rebalance": {
           "oneOf": [
             {"type": "null"},
