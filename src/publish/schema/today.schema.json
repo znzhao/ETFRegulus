@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "today.schema.json",
   "title": "Today's holdings per portfolio",
-  "description": "One entry per strategy x ceiling: the strategy's own simulated position at the close of data_date.",
+  "description": "One entry per strategy x ceiling: the strategy's simulated book at the close of data_date, and the decision taken at that close, which executes at the next session's open.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "data_date", "portfolios"],
@@ -32,18 +32,21 @@
     "ret": {"type": ["number", "null"], "minimum": -1},
     "portfolio": {
       "type": "object", "additionalProperties": false,
-      "required": ["strategy", "ceiling", "weights", "drawdown", "risk_state", "locks", "returns",
-                   "last_rebalance", "traded_today"],
+      "required": ["strategy", "ceiling", "weights", "current_weights", "next_trades", "drawdown",
+                   "risk_state", "locks", "returns", "last_rebalance", "traded_today"],
       "properties": {
         "strategy": {"type": "string", "pattern": "^[a-z0-9_]+$"},
         "ceiling": {"type": "integer", "minimum": 1, "maximum": 100},
-        "weights": {"$ref": "#/$defs/weights"},
+        "weights": {"$ref": "#/$defs/weights", "description": "The plan: target weights for the next session's open, after the lock and the risk rule."},
+        "current_weights": {"$ref": "#/$defs/weights", "description": "The book at the close of data_date."},
+        "next_trades": {"type": "array", "items": {"$ref": "#/$defs/change"},
+                        "description": "ETFs whose weight changes from current_weights to weights by at least 0.1 percentage point."},
         "drawdown": {"type": "number", "minimum": 0, "maximum": 1},
         "risk_state": {"enum": ["normal", "over_budget", "capital_preservation"],
-                       "description": "normal: within the risk budget; over_budget: the no-risk-increase rule binds; capital_preservation: drawdown past the ceiling."},
+                       "description": "Of the plan's decision. normal: within the risk budget; over_budget: the no-risk-increase rule binds; capital_preservation: drawdown past the ceiling."},
         "locks": {"type": "object", "propertyNames": {"type": "string", "pattern": "^[A-Z]{1,5}$"},
                   "additionalProperties": {"$ref": "#/$defs/date"},
-                  "description": "Held ETFs still locked after data_date, mapped to the first session they may be sold."},
+                  "description": "ETFs held at the close of data_date and still locked after it, mapped to the first session they may be sold. A purchase in next_trades relocks that ETF."},
         "returns": {
           "type": "object", "additionalProperties": false, "required": ["d1", "m1", "ytd", "y1"],
           "properties": {"d1": {"$ref": "#/$defs/ret"}, "m1": {"$ref": "#/$defs/ret"},
@@ -57,7 +60,7 @@
                             "changes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/change"}}}}
           ]
         },
-        "traded_today": {"type": "boolean"}
+        "traded_today": {"type": "boolean", "description": "The last rebalance executed on data_date."}
       }
     }
   }

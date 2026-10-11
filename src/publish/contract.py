@@ -101,8 +101,13 @@ def validate_site(data_dir: str | Path) -> list[str]:
                 errs.append(f"today/{pid}: id does not match strategy and ceiling")
             if tickers:
                 errs.extend(_weights_ok(f"today/{pid}", p["weights"], known))
+                errs.extend(_weights_ok(f"today/{pid}/current", p["current_weights"], known))
+            for c in p["next_trades"]:
+                cur, tgt = p["current_weights"].get(c["ticker"], 0.0), p["weights"].get(c["ticker"], 0.0)
+                if abs(c["from"] - cur) > WEIGHT_TOL or abs(c["to"] - tgt) > WEIGHT_TOL:
+                    errs.append(f"today/{pid}: next_trades {c['ticker']} disagrees with the weights")
             for t, until in p["locks"].items():
-                if t not in p["weights"]:
+                if t not in p["current_weights"]:
                     errs.append(f"today/{pid}: lock on {t}, which is not held")
                 if until <= date:
                     errs.append(f"today/{pid}: lock on {t} already expired ({until})")

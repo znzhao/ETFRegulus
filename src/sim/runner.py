@@ -67,6 +67,7 @@ def build_sim_config(resolved: dict, constraints: ConstraintsConfig, *,
         risk_enabled=bool(sim.get("risk_enabled", True)),
         seed=seed,
         risk_lookback=int(sim.get("risk_lookback", 756)),
+        peak_window=int(constraints.drawdown.peak_window_sessions),
     )
 
 

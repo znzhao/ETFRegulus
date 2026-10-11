@@ -174,27 +174,52 @@ Check: the fake data passes the contract (both variants). 20 tests in
 build helpers. The full suite passes (488). The mockup keeps its own in-page generator; wiring a
 page to the JSON files is part of Step 7, which starts from this fake data.
 
-### Step 3 — The publish pipeline in ETFRegulus
+### Step 3 — The publish pipeline in ETFRegulus ✅ (2026-10-10, except item 3)
 
 New code in ETFRegulus, so it is tested with the research code and pinned by a tag.
 
-1. `scripts/s15_publish.py`: takes the curated data and an output directory, runs the six
-   baselines × ceilings {5, 10, 15}% with lock 30 through the existing simulator
-   (`src/sim/simulator.py`, `src/baselines/strategies.py`) and writes the files of §3.
-2. Rule set: the main-line constraint layer, `config/experiments/redesign_df.yaml` (D-F, under
-   which the constrained baselines did best). The config file is a parameter, so the O-2 rule
-   (§14 of the redesign plan) can be switched in later. Every output records the config hash.
-3. Incremental fetch: `s01`/`s02` gain a mode that starts from the cached curated data and
-   adds new sessions only. The full Stage 2 quality gate still runs over the new rows.
-4. Measure the running time of a full rebuild on the CPU. If it is over ~15 minutes (the
-   classical optimizer and the risk layer are the likely cost), resume each strategy from its
-   saved end state instead of replaying from 2004, with a weekly full rebuild as a check that
-   the two agree.
-5. Tests: output passes the schemas; a strategy's last-day weights equal what `s05` produces for
-   the same data; a holiday run is a no-op; a failed fetch produces no output.
+1. **Done.** `scripts/s15_publish.py --out <dir>` (logic in `src/publish/pipeline.py`) runs the
+   six baselines × ceilings {5, 10, 15}% with the 30-day lock through the research simulator,
+   writes the files of §3 into a temporary directory, checks them against the contract, and
+   only then swaps them in. A failure leaves the previous data untouched.
+2. **Done, with two decisions made along the way.** The rule set is
+   `config/experiments/webapp.yaml` (hash `d2a9a04c`): the main-line D-F rule, plus:
+   - **Drawdown measured from the highest NAV of the past 12 months** (252 sessions; decided by
+     the user 2026-10-10). On one continuous 2004–2026 path, an all-time peak that never resets
+     leaves a strategy in capital preservation for good after 2008: 60/40 at 5% was 100% cash
+     from 2009 to 2026 (Sharpe 0.27). The rolling peak is a new opt-in simulator setting,
+     `drawdown.peak_window_sessions` (`SimulationConfig.peak_window`); the default 0 keeps the
+     research behaviour, and every research config hash is unchanged.
+   - **A strategy's "hold" is a genuine no-trade session** (`pipeline.true_hold`). Between
+     rebalances the baselines ask for the current weights; the engine executes weights at the
+     next open, so overnight price moves turned every hold into small trades, each buy relocking
+     the ETF. Momentum traded on 3,256 of 5,702 sessions. The user flagged the daily trading as
+     unintended. Holds now go through `engine.hold`; momentum trades on 214 sessions (~9 a
+     year) and its Sharpe at 5% rose from 0.38 to 0.57. **The research simulator still has this
+     behaviour** (it affects the research baselines and their comparisons); see the
+     redesign plan for whether to change it there.
+   - "Today's plan" is the decision taken at the final close, projected through the lock and the
+     risk rule but not executed (`engine.plan_next`), so `today.json` carries both the book at
+     the close (`current_weights`) and the plan for the next open (`weights`, `next_trades`).
+   - Published trades leave out weight changes under 0.1 percentage point.
+3. **Not done: incremental fetch.** `s01_fetch_data` already has `--incremental`. It was not run
+   here because it would overwrite `data/curated/`, which the research campaigns depend on
+   (see `CONTINUAL_TRAINING_PLAN.md` on data versioning). The daily job will keep its own data
+   copy on the `data` branch (§1); wiring s01/s02 to that directory is done in Step 5.
+4. **Done.** A full rebuild takes **3 min 8 s** on the local CPU (8–12 s per portfolio), far under
+   the 15-minute budget, so no resume-from-saved-state is needed. The output is 5.1 MB.
+5. **Done.** `tests/publish/test_pipeline.py`: valid output, a monthly strategy trades at most
+   about monthly, the path matches the simulation, and a failed check keeps the old data;
+   `tests/sim/test_peak_window.py`: the rolling peak. Suite: 500 passed.
 
-Check: one command turns the current local data into a full site data set, within the time
-budget, with all tests passing.
+Check: met, except item 3.
+
+**Known limitation, carried to the redesign plan (O-2):** under the current D-F rule the
+ceiling does not force any selling, so realized drawdowns go far past it in a crash. At 5%,
+measured from the 12-month peak, the worst drawdowns were 21–35% (all in 2008–09). It was
+on 14–21% of days for most strategies (6% for the classical optimizer). The stepwise de-risking
+the user decided on (O-2, `MODEL_REDESIGN_PLAN.md` §14 step 1) is the fix. When it is built,
+`true_hold` must let a hold past the ceiling go through the risk rule instead of skipping it.
 
 ### Step 4 — Live log and day-over-day changes
 

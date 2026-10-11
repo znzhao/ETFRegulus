@@ -235,6 +235,11 @@ class RiskEnvelope:
             return float(np.mean(losses))
         return float(np.quantile(losses, 0.9))
 
+    @property
+    def samples(self) -> tuple[StressSample, ...]:
+        """The stress samples prepared for the current session (read-only view)."""
+        return tuple(self._samples)
+
     def set_budget(self, nav: float, peak: float, d_max: float) -> float:
         self._budget = risk_budget(nav, peak, d_max)
         return self._budget

@@ -224,6 +224,9 @@ class LockSpec:
 @dataclass(frozen=True)
 class DrawdownSpec:
     max_drawdown: MaxDrawdownSpec = field(default_factory=MaxDrawdownSpec)
+    #: Sessions over which the drawdown peak is taken; 0 = since the start, never reset
+    #: (the research setting). See `SimulationConfig.peak_window`.
+    peak_window_sessions: int = 0
 
 
 @dataclass(frozen=True)
