@@ -73,6 +73,7 @@ def execute(
     bars: Mapping[str, Mapping[str, float]] | None = None,
     cost_bps: float = 0.0,
     max_shares: Mapping[str, float] | None = None,
+    keep_shares: Mapping[str, float] | None = None,
 ) -> ExecutionResult:
     """Trade toward `target_weights` at `session`'s open.
 
@@ -108,6 +109,13 @@ def execute(
         w = float(target_weights.get(ticker, 0.0) or 0.0)
         price = float(open_prices[ticker])
         target_shares[ticker] = max(0.0, nav_at_open * w / price)
+
+    # R-1, the no-trade band: these ETFs keep their exact share count -- no leg, so no
+    # relock. Applied before the lock floor and the caps, which it already satisfies (a
+    # kept count is the held count).
+    for ticker, n in (keep_shares or {}).items():
+        if ticker in target_shares and available.get(ticker, True) is not False:
+            target_shares[ticker] = float(n)
 
     # The share floor, re-derived here and enforced as the authoritative bound.
     floor_binding = 0

@@ -49,6 +49,8 @@ class InitialState:
     nav: float
     drawdown: float
     source: str
+    #: Close NAVs of the trailing peak window (R-3); None for all-time-peak states.
+    navs: list | None = None
 
     def describe(self) -> dict:
         return {"session": str(self.session.date()), "nav": self.nav, "peak": self.peak,
@@ -170,6 +172,7 @@ class ReservoirSampler:
             lock_manager=LockManager.from_dict(raw["lock_manager"]),
             peak=float(raw["peak"]), nav=float(raw["nav"]),
             drawdown=float(raw["drawdown"]), source="reservoir",
+            navs=raw.get("navs"),
         )
 
     def sample(self, rng: np.random.Generator, *, hold_days: int, max_drawdown: float,

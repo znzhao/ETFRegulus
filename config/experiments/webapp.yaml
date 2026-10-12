@@ -1,6 +1,4 @@
-# The web app's rule set (WEBAPP_PLAN.md Step 3): the main-line D-F risk rule, with drawdown
-# measured from the highest NAV of the past 12 months (252 sessions) instead of all time.
-extends: redesign_df.yaml
-
-drawdown:
-  peak_window_sessions: 252
+# The web app's rule set (WEBAPP_PLAN.md Step 3): the research main line, unchanged --
+# D-F, the no-trade band (R-1), drawdown from the 12-month high (R-3) and O-2 stepwise
+# de-risking past the ceiling (R-4); see MODEL_REDESIGN_PLAN.md section 15.
+extends: redesign_v2.yaml

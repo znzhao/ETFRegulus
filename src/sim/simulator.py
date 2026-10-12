@@ -148,6 +148,8 @@ class SimulationConfig:
     #: multi-decade path a never-reset peak leaves a strategy in capital preservation for
     #: good after its first deep drawdown (WEBAPP_PLAN.md Step 3).
     peak_window: int = 0
+    #: R-1 no-trade band, in weight units (see `ExecutionSpec.no_trade_band`). 0 = off.
+    no_trade_band: float = 0.0
 
 
 @dataclass

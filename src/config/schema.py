@@ -238,6 +238,10 @@ class ProjectionSpec:
     #: behaviour. `no_risk_increase`: redesign decision D-F -- execute any action no riskier
     #: than keeping the current holdings; scale a riskier one back toward them.
     over_budget_rule: Literal["freeze", "no_risk_increase"] = "freeze"
+    #: O-2 (redesign plan section 14 step 1 / section 15 R-4). Past the drawdown ceiling, under
+    #: `no_risk_increase`, every decision must cut the stressed loss of the current holdings
+    #: by at least this fraction (down to the locked-plus-cash floor). 0 = off (plain D-F).
+    derisk_step: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -257,6 +261,11 @@ class RiskSpec:
 @dataclass(frozen=True)
 class ExecutionSpec:
     cost_bps: float = 0.0     # D10 -- frictionless at v1
+    #: R-1 (redesign plan section 15). An ETF whose target weight is within this many
+    #: weight units (0.01 = one percentage point) of its current weight is not traded:
+    #: its share count is kept and it is not relocked. Not a cost model -- it exists
+    #: because every purchase relocks the position. 0 = off.
+    no_trade_band: float = 0.0
 
 
 @dataclass(frozen=True)

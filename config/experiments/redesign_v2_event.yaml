@@ -1,0 +1,14 @@
+# The revised main line (redesign_v2.yaml) with event-driven decisions and free-capital
+# actions, as in redesign_event.yaml -- the side comparison of MODEL_REDESIGN_PLAN.md
+# section 15, R-5. Past the drawdown ceiling every session is a decision, so O-2's
+# stepwise de-risking is not delayed by the weekly cadence.
+extends:
+  - redesign_v2.yaml
+
+environment:
+  decision_cadence: 5
+  action_mode: free_capital
+  preservation_daily: true
+
+ppo:
+  gamma: 0.995

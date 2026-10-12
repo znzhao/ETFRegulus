@@ -82,6 +82,17 @@ def _latest_summary() -> dict | None:
     return json.loads(runs[-1].read_text(encoding="utf-8")) if runs else None
 
 
+def _latest_calibration() -> dict | None:
+    """The newest Stage 5 run that ran the calibration (`--skip-calibration` runs, e.g. the
+    rule-set re-runs of MODEL_REDESIGN_PLAN.md section 15, leave it None)."""
+    for path in sorted(Path("artifacts/runs").glob("s05_run_baselines_*/baseline_summary.json"),
+                       reverse=True):
+        cal = json.loads(path.read_text(encoding="utf-8")).get("calibration")
+        if cal is not None:
+            return cal
+    return None
+
+
 @pytest.mark.skipif(_latest_summary() is None, reason="run Stage 5 first")
 def test_stage5_produced_all_six_baselines_with_zero_violations():
     s = _latest_summary()
@@ -101,12 +112,10 @@ def test_every_stage5_acceptance_check_passed():
     assert len(s["checks"]) >= 5
 
 
-@pytest.mark.skipif(_latest_summary() is None, reason="run Stage 5 first")
+@pytest.mark.skipif(_latest_calibration() is None, reason="run Stage 5 with the calibration first")
 def test_the_calibration_closed_q1_with_an_admissible_candidate():
     """Q1: the envelope must be neither ornamental nor paralyzing."""
-    s = _latest_summary()
-    cal = s["calibration"]
-    assert cal is not None, "the calibration did not run"
+    cal = _latest_calibration()
     assert cal["chosen"] is not None, (
         "no candidate was admissible; the envelope is over-calibrated and Stage 7 would "
         "train an agent that just sits in cash"
@@ -119,11 +128,11 @@ def test_the_calibration_closed_q1_with_an_admissible_candidate():
     assert chosen["aggregation"] == "max", "a hard constraint takes the conservative aggregation"
 
 
-@pytest.mark.skipif(_latest_summary() is None, reason="run Stage 5 first")
+@pytest.mark.skipif(_latest_calibration() is None, reason="run Stage 5 with the calibration first")
 def test_the_calibration_used_annual_windows():
     """On one 21-year path the intervention rate just measures time under water, because
     the peak never resets. See reference/risk-envelope.md section 7."""
-    cal = _latest_summary()["calibration"]
+    cal = _latest_calibration()
     assert cal["window"] == "annual"
     assert cal["n_cells"] > 100
 

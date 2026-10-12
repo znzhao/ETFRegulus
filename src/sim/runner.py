@@ -68,6 +68,7 @@ def build_sim_config(resolved: dict, constraints: ConstraintsConfig, *,
         seed=seed,
         risk_lookback=int(sim.get("risk_lookback", 756)),
         peak_window=int(constraints.drawdown.peak_window_sessions),
+        no_trade_band=float(constraints.execution.no_trade_band),
     )
 
 
@@ -121,4 +122,5 @@ def make_weight_fn(resolved: dict, market: MarketData, *, strategy=None) -> tupl
 def make_projector_from(constraints: ConstraintsConfig):
     return make_projector(constraints.projection.backend,
                           constraints.projection.alpha_tolerance,
-                          over_budget_rule=constraints.projection.over_budget_rule)
+                          over_budget_rule=constraints.projection.over_budget_rule,
+                          derisk_step=constraints.projection.derisk_step)

@@ -39,7 +39,7 @@ from src.env.feature_store import FeatureStore
 from src.env.observation import ObservationSpec
 from src.env.reset_sampler import InitialState, ResetSampler, flat_state
 from src.env.state_builder import build_observation
-from src.sim.engine import DecisionClock, EngineState, advance, hold, observe
+from src.sim.engine import state_from, DecisionClock, EngineState, advance, hold, observe
 from src.sim.simulator import MarketData, SimulationConfig
 
 #: The action space is `Box(-1, 1)`, and the environment scales it by `LOGIT_SCALE` before
@@ -96,6 +96,8 @@ class EnvConfig:
     #: sessions and at once on an unlock or a capital-preservation flip; hold in between,
     #: and return the reward accumulated over the whole interval.
     decision_cadence: int = 0
+    #: With O-2, decide at every session past the drawdown ceiling (event-driven mode).
+    preservation_daily: bool = False
     #: `full`: the action is the whole target portfolio (the original). `free_capital`: the
     #: action allocates only the capital the lock leaves free -- locked positions keep their
     #: floor, and weight put on a locked ETF is a purchase that relocks it. Feasible under
@@ -173,7 +175,7 @@ class ETFAllocationEnv(gym.Env):
         self._steps = 0
         self._nav_at_reset = 1.0
         self._feature_offset = 0
-        self._clock = DecisionClock(cfg.decision_cadence)
+        self._clock = DecisionClock(cfg.decision_cadence, cfg.preservation_daily)
         if cfg.action_mode not in ("full", "free_capital"):
             raise ValueError(f"unknown action_mode {cfg.action_mode!r}")
         if seed is not None:
@@ -237,11 +239,13 @@ class ETFAllocationEnv(gym.Env):
             cost_bps=self.sim_cfg.cost_bps, initial_cash=self.sim_cfg.initial_cash,
             lock_scope=self.sim_cfg.lock_scope, risk_enabled=cfg.risk_enabled,
             seed=self.sim_cfg.seed, risk_lookback=self.sim_cfg.risk_lookback,
+            peak_window=self.sim_cfg.peak_window, no_trade_band=self.sim_cfg.no_trade_band,
         )
-        # The peak is INHERITED from the sampled state, not reset to the NAV.
-        self.state = EngineState(ledger=init.ledger.copy(),
-                                 lock_manager=init.lock_manager.copy(),
-                                 peak=float(init.peak))
+        # The peak is INHERITED from the sampled state, not reset to the NAV (with a
+        # rolling peak, the sampled window of NAVs is restored -- R-3).
+        self.state = state_from(init.ledger.copy(), init.lock_manager.copy(), self.sim_cfg,
+                                nav=float(init.nav), peak=float(init.peak),
+                                navs=getattr(init, "navs", None))
         self._row = row
         self._steps = 0
         self.violations = []

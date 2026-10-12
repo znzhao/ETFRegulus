@@ -123,7 +123,15 @@ def main(resolved: dict, ctx: StageContext) -> None:
         checks.update(_n_controls(ctx, market, resolved, constraints, projector, controls))
 
     if "spy_tlt_60_40" in summaries:
-        traj = pd.read_parquet(ctx.run_dir / "baselines/spy_tlt_60_40/trajectory.parquet")
+        # A DATA check (is the total-return bond series right?), so it runs on plain 60/40:
+        # no risk layer, no band, all-time peak. Under a rule set that cuts risk past the
+        # ceiling (O-2) the risk-managed run is meant to be shallower, which says nothing
+        # about the data.
+        cfg_plain = build_sim_config(resolved, constraints, seed=ctx.seed)
+        cfg_plain.risk_enabled, cfg_plain.no_trade_band, cfg_plain.peak_window = False, 0.0, 0
+        traj = simulate(market, BASELINES["spy_tlt_60_40"].build(
+            market, bcfg.get("params", {}).get("spy_tlt_60_40", {})), cfg_plain,
+            projector=projector).trajectory
         in_2022 = traj.loc["2022"] if "2022" in traj.index.astype(str).str[:4].values else None
         depth = float(in_2022["drawdown"].max()) if in_2022 is not None and len(in_2022) else 0.0
         checks["spy_tlt_60_40_severe_2022"] = {
@@ -191,6 +199,8 @@ def _n_controls(ctx, market, resolved, constraints, projector, control_set) -> d
     def run(name, hold_days):
         cfg = build_sim_config(resolved, constraints, hold_days=hold_days, seed=ctx.seed)
         cfg.risk_enabled = False        # isolate the LOCK from the envelope
+        cfg.no_trade_band = 0.0         # ...and from the no-trade band (R-1), which would
+        # otherwise remove the N=0 control's daily churn and mask whether the lock binds
         fn = BASELINES[name].build(market, resolved["baselines"]["params"].get(name, {}))
         return simulate(market, fn, cfg, projector=projector).trajectory
 

@@ -143,8 +143,11 @@ def test_free_capital_actions_never_need_the_lock_repaired(bundle):
     while not done:
         _, _, term, trunc, info = env.step(rng.uniform(-1, 1, env.action_space.shape))
         raw, executed = info["raw_weights"], info["executed_weights"]
-        # With risk off, the only thing the projector could change is a lock floor.
-        assert np.allclose(raw, executed, atol=1e-6)
+        # With risk off, the only things the projector could change are a lock floor and,
+        # past the drawdown ceiling, the capital-preservation caps of the `freeze` rule --
+        # which a sampled start state can reach (whether it does depends on the reservoir).
+        if not info["capital_preservation"]:
+            assert np.allclose(raw, executed, atol=1e-6)
         done = term or trunc
 
 
