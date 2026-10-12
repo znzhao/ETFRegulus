@@ -181,10 +181,28 @@ def advance(
     elif dec.capital_preservation:
         max_shares = {t: st.ledger.get(t) for t in universe}
 
+    # R-1: an ETF whose target is within the band of its current weight is left exactly as
+    # it is -- no leg, so no relock. On a decision O-2 forced, only small BUYS are
+    # suppressed: every sale still executes, so the band never softens a required cut in
+    # risk. (Executing a forced decision's weights in full would otherwise top up any
+    # position that fell overnight, relock it, and so leave it unsellable at the next
+    # forced decision -- a loop that kept positions locked through whole crises.)
+    keep, band_suppressed = None, 0
+    if cfg.no_trade_band > 0:
+        cur_w = dec.ctx.current_weights
+        keep = {}
+        for j, t in enumerate(universe):
+            gap = float(projected.weights[j + 1]) - float(cur_w[j + 1])
+            small = abs(gap) < cfg.no_trade_band
+            if small and (not diag.derisk_forced or gap >= 0):
+                keep[t] = st.ledger.get(t)
+                if abs(gap) > 1e-9:
+                    band_suppressed += 1
+
     result = execute(
         st.ledger, target, opens, exec_session,
         available=avail_next, lock_manager=st.lock_manager, bars=market.bars_at(nxt),
-        cost_bps=cfg.cost_bps, max_shares=max_shares,
+        cost_bps=cfg.cost_bps, max_shares=max_shares, keep_shares=keep,
     )
 
     # A locked position that shrank is a lock violation, checked against what actually
@@ -207,7 +225,8 @@ def advance(
         market, st, cfg, nxt, val, dec, diag, reward=reward, turnover=result.turnover,
         cost_paid=result.cost_paid, proj_weights=projected.weights, raw_weights=a_raw,
         share_floor_binding=result.share_floor_binding,
-        preservation_cap_binding=result.preservation_cap_binding, decision=True)
+        preservation_cap_binding=result.preservation_cap_binding, decision=True,
+        band_suppressed=band_suppressed)
     return Outcome(row=row, reward=reward, nav=val.nav,
                    lock_violations=n_lock_violations, diagnostics=diag,
                    projected=projected.weights)
@@ -275,8 +294,11 @@ class DecisionClock:
     schedule it was trained on.
     """
 
-    def __init__(self, cadence: int):
+    def __init__(self, cadence: int, preservation_daily: bool = False):
         self.cadence = int(cadence)
+        #: O-2 requires risk to come down at every decision past the ceiling; with this
+        #: set, every session past the ceiling is a decision.
+        self.preservation_daily = bool(preservation_daily)
         self.reset()
 
     def reset(self) -> None:
@@ -294,7 +316,7 @@ class DecisionClock:
                     and bool((self._locked & ~locked & held).any()))
         flipped = self._preservation is not None and preservation != self._preservation
         due = (self._last is None or ctx.step - self._last >= self.cadence
-               or unlocked or flipped)
+               or unlocked or flipped or (self.preservation_daily and preservation))
         self._locked = locked
         self._preservation = preservation
         if due:
@@ -306,7 +328,8 @@ def _trajectory_row(market: MarketData, st: EngineState, cfg: SimulationConfig, 
                     val, dec: Decision, diag: ProjectionDiagnostics, *, reward: float,
                     turnover: float, cost_paid: float, proj_weights: np.ndarray,
                     raw_weights: np.ndarray, share_floor_binding: int,
-                    preservation_cap_binding: int, decision: bool) -> dict:
+                    preservation_cap_binding: int, decision: bool,
+                    band_suppressed: int = 0) -> dict:
     """One trajectory row, shared by decision and hold sessions so they cannot drift."""
     universe = market.universe
     next_closes = market.prices_at(nxt, "close_raw")
@@ -323,6 +346,9 @@ def _trajectory_row(market: MarketData, st: EngineState, cfg: SimulationConfig, 
         "capital_preservation": bool(diag.capital_preservation),
         "infeasible_fallback": bool(diag.infeasible_fallback),
         "no_risk_increase": bool(diag.no_risk_increase),
+        "derisk_forced": bool(diag.derisk_forced),
+        # R-1: ETFs whose (non-zero) weight change was inside the no-trade band.
+        "band_suppressed": int(band_suppressed),
         "budget_degenerate": bool(diag.budget_degenerate),
         "de_risk_alpha": diag.de_risk_alpha,
         "availability_clipped": diag.availability_clipped,
@@ -364,6 +390,8 @@ def reservoir_entry(market: MarketData, st: EngineState, cfg: SimulationConfig,
         "lock_manager": st.lock_manager.to_dict(),
         "peak": float(st.peak), "nav": float(dec.nav), "drawdown": float(dec.drawdown),
         "n_param": cfg.hold_days, "dmax_param": cfg.max_drawdown,
+        # With a rolling peak (R-3) the state includes the window of close NAVs.
+        **({"navs": [float(x) for x in st.navs]} if st.navs is not None else {}),
     }
 
 
@@ -378,6 +406,23 @@ def _mark(st: EngineState, cfg: SimulationConfig, closes: dict, divs: dict):
         st.navs.append(val.nav)
     st.peak = val.peak
     return val
+
+
+def state_from(ledger: Ledger, lock_manager: LockManager, cfg: SimulationConfig, *,
+               nav: float, peak: float, navs=None) -> EngineState:
+    """An `EngineState` for a sampled initial state (environment resets).
+
+    All-time peak: the sampled peak is inherited. Rolling peak (R-3): the sampled window of
+    close NAVs is restored; a state without one (constructive, or from an all-time-peak
+    reservoir) gets `[peak, nav]` if it starts in a drawdown, else `[nav]`.
+    """
+    if not cfg.peak_window:
+        return EngineState(ledger=ledger, lock_manager=lock_manager, peak=float(peak))
+    W = int(cfg.peak_window)
+    window = list(navs) if navs else ([float(peak), float(nav)] if peak > nav else [float(nav)])
+    window = deque(window[-W:], maxlen=W)
+    return EngineState(ledger=ledger, lock_manager=lock_manager,
+                       peak=max(max(window), float(nav)), navs=window)
 
 
 def initial_state(market: MarketData, cfg: SimulationConfig, *,

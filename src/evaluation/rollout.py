@@ -37,6 +37,7 @@ class PolicyWeightSource:
     def __init__(self, model, spec: ObservationSpec, store: FeatureStore,
                  market: MarketData, *, hold_days: int, max_drawdown: float,
                  deterministic: bool = True, decision_cadence: int = 0,
+                 preservation_daily: bool = False,
                  action_mode: str = "full"):
         self.model = model
         self.spec = spec
@@ -51,7 +52,7 @@ class PolicyWeightSource:
         self.action_mode = action_mode
         # The SAME clock the environment trains under, so the policy is evaluated on the
         # schedule it learned on. Between decisions it returns None: hold, do not trade.
-        self._clock = DecisionClock(decision_cadence)
+        self._clock = DecisionClock(decision_cadence, preservation_daily)
 
     def reset(self) -> None:
         self._nav_at_reset = None
@@ -124,6 +125,7 @@ def rollout(model, bundle, *, hold_days: int, max_drawdown: float,
                                 hold_days=hold_days, max_drawdown=max_drawdown,
                                 deterministic=deterministic,
                                 decision_cadence=getattr(env_cfg, "decision_cadence", 0),
+                                preservation_daily=getattr(env_cfg, "preservation_daily", False),
                                 action_mode=getattr(env_cfg, "action_mode", "full"))
     return simulate(
         bundle.market, source, sim_cfg,
