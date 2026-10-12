@@ -637,3 +637,26 @@ Market-forced path dependence, as in earlier campaigns; not a defect.
 - It trains to the 2% and 4% checkpoints first. Further budget waits for the user's go-ahead.
 - Controls at equal budget: `seeds_v1` (old environment) and `seeds_df` (D-F only), both re-scored under
   the corrected rules (15e).
+
+**R-5 first results (2026-10-12): `seeds_v2` to 4%.** 81.6 minutes and 211 rollouts; stopped at an average
+budget of 4.12%. Every model is scored under the corrected rules: the controls are re-scored with
+`s17_reevaluate.py`.
+
+| Ensemble Sharpe (test avg over D_max 5/10/15% / validation avg) | 2% | 4% |
+|---|---|---|
+| `seeds_v2` (trained on `redesign_v2`) | 0.39 / 0.39 | 0.43 / 0.43 |
+| `seeds_df` (trained on D-F only) | 0.51 / 0.49 | 0.55 / 0.48 |
+| `seeds_v1` (trained on the old environment) | 0.49 / 0.37 | 0.51 / 0.43 |
+
+- **Training on the corrected rules shows no advantage yet.** At 4%, `seeds_v2` matches `seeds_v1` and
+  trails `seeds_df` on validation. The gaps are within the seed spread: `seeds_v2`'s seeds score 0.49 /
+  0.49 / 0.22 on validation.
+- **The agent has not learned to hold more than the controls.** All three trade on about 25–29% of
+  sessions with about 61% of holdings locked. That level is set by the band, not learned.
+- **Full report** (`artifacts/reports/seeds_v2_C1_full`): RL 0.45 on the primary cell, against
+  constrained 60/40 at 1.04. Acceptance 17/28 with every hard criterion passing.
+- **D_max monotonicity fails again on the continuous path** (10%: 31.2%, 15%: 26.6%). Both worst
+  drawdowns are 2020-03-18, with 99–100% of the book locked; there are zero preventable breaches.
+
+Paused at 4% for the user's decision.
+
