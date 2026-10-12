@@ -338,3 +338,10 @@ The site is live at **https://znzhao.github.io/etfregulus-site/** (repository
 Open items: port the risk rule to the browser (Step 6); O-2 stepwise de-risking (also fixes the
 drawdown overshoot); decide whether the research simulator adopts true holds
 (`MODEL_REDESIGN_PLAN.md` §14 item 5); move the workflow actions off Node 20 before GitHub removes it.
+
+**Update 2026-10-12.** The site now runs the research main line unchanged (`webapp.yaml` extends `redesign_v2.yaml`):
+- the no-trade band replaces the `true_hold` patch;
+- O-2 cuts risk step by step past the ceiling, and the About page says so;
+- monthly strategies no longer treat the last data day as a month-end.
+
+ETFRegulus tag `webapp-v4`.

@@ -531,3 +531,94 @@ Steps 1–4 are code changes with short validation runs; no long training is nee
 |---|---|---|
 | R-Q1 | Band width *b* | Set on validation years from a small grid (e.g. 0.5, 1, 2, 3 percentage points), or fix a value up front |
 | R-Q2 | Headline metric | The continuous multi-year test path with the 12-month peak (matches the web app), or the mean of annual test folds (matches every earlier report). Either way, both are reported |
+
+### 15e. Status after steps 1–4 (2026-10-12): built, measured, paused before training
+
+**Built** (all opt-in, research defaults and config hashes unchanged; 520 tests pass):
+
+| Item | Where | Notes |
+|---|---|---|
+| R-1 no-trade band | `execution.no_trade_band`, `engine.advance` → `execute(keep_shares=...)` | On a decision O-2 forced, only small *buys* are suppressed and every sale executes. Without that, forced decisions topped up positions that fell overnight, relocked them, and left them unsellable at the next forced decision. A first test run caught this |
+| R-3 rolling peak in training | `env.reset` restores the peak window via `engine.state_from`; reservoir entries carry `navs` | The new Stage 5 reservoir under `redesign_v2.yaml` (1,626 states, all with a NAV window) is now the latest, so **any** training run will sample from it |
+| R-4 O-2 | `projection.derisk_step`, `AnalyticProjector._derisk_past_ceiling` (the cvxpy oracle shares it) | Past the ceiling, the bound is `max(budget, stress(w_safe), (1 - k) * stress(holdings))`; a proposal over it is blended toward `w_safe`. Event mode decides every session past the ceiling (`environment.preservation_daily`) |
+| Main-line config | `config/experiments/redesign_v2.yaml` (hash `e2445474`), event variant `redesign_v2_event.yaml` | D-F + band 1 pp + 12-month peak + O-2 k = 0.2 |
+| Re-evaluation | `scripts/s17_reevaluate.py` | Scores frozen checkpoints under another rule set, in Stage 8 layout, optionally with the full Stage 9–12 report. Re-evaluating `seeds_df` C3 under the old rules reproduced all 84 original trajectories exactly |
+| Fixes found on the way | `strategies._month_ends`; Stage 5 gates | (a) A window ending mid-month treated its last day as a month-end, so in the live app every monthly strategy "rebalanced" daily. (b) Two Stage 5 gates now test only what they are for: the lock gate runs without the band, and the 2022 data check runs on plain 60/40 |
+
+**R-Q1, band width (provisional: 1 pp).** `scripts/s16_band_sweep.py` ran `seeds_df` C3 on the 14 validation
+years. Mean Sharpe over D_max 5/10/15% was 0.64 / 0.66 / 0.64 / 0.61 / 0.70 for bands 0 / 0.5 / 1 / 2 / 3 pp.
+- Every band's paired 90% interval against no band includes zero.
+- At the 5% ceiling every band was worse, better in only 2–6 of 14 years.
+- The share of holdings locked fell from 96% (no band) to 72% (1 pp).
+
+These models were trained without a band, so this cannot show the band's purpose, which is to let a
+retrained agent hold. 1 pp is kept provisionally and **re-checked at R-5, choosing between 0.5 and 1 pp on
+validation years**.
+
+**Results: the trained models under the corrected rules (no retraining).** Ensemble Sharpe, D_max 5 / 10 /
+15%, 2012–2025 annual folds:
+
+| Model | Test, old rules | Test, corrected | Validation avg, old → corrected | Trade days / locked (5%), old → corrected |
+|---|---|---|---|---|
+| `seeds_v1` C4 (old env, 32%) | 0.86 / 0.83 / 0.87 | 0.59 / 0.58 / 0.70 | 0.44 → 0.40 | 67% / 87% → 32% / 59% |
+| `seeds_df` C3 (D-F, 16%) | 0.79 / 0.65 / 0.72 | 0.50 / 0.48 / 0.48 | 0.53 → 0.53 | 49% / 91% → 28% / 61% |
+| `seeds_event` C2 (Phase 2, 8%) | 0.50 / 0.46 / 0.43 | 0.36 / 0.29 / 0.32 | 0.69 → 0.31 | 18% / 78% → 14% / 44% |
+
+**Results: the baselines and the bar (Stage 12, N = 30, D_max = 5%, annual folds).**
+
+| Strategy | Sharpe, old → corrected | Worst-year drawdown, old → corrected | Avg cash, old → corrected |
+|---|---|---|---|
+| RL (`seeds_df` C3 ensemble) | 0.78 → 0.49 | 15.0% → 13.8% | 37% → 48% |
+| 60/40 constrained | **1.14 → 1.04** | 12.7% → 5.7% | 35% → 45% |
+| Classical optimizer constrained | 0.86 → 0.88 | 15.6% → 6.8% | 22% → 32% |
+| SPY constrained | 0.70 → 0.68 | 21.3% → 15.3% | 51% → 53% |
+| Equal weight constrained | 0.80 → 0.65 | 16.7% → 5.7% | 37% → 49% |
+| Momentum constrained | **0.95 → 0.48** | 13.5% → 12.0% | 46% → 58% |
+
+- Acceptance: 21/28 → 18/28 criteria.
+- Every hard engineering criterion still passes (zero lock, feasibility and preventable violations).
+- D_max breaches fall from 29 to 19.
+
+**Stage 9, continuous 2012–2026 path** (realized max drawdown at D_max 1 / 2 / 3 / 5 / 7.5 / 10 / 15%):
+- old: 2.1 / 3.5 / 3.6 / 7.3 / 17.3 / 30.5 / 37.3%
+- corrected: 3.0 / 6.9 / 8.3 / 21.9 / 20.3 / 22.5 / 20.0%
+
+Under the old all-time peak, a strategy past a tight ceiling stayed in cash for the rest of the path, which
+kept realized drawdowns tiny at 1–5%. The rolling peak lets it re-enter after 12 months and meet later crises.
+
+The monotonicity gate fails between 10% and 15% (22.5% vs 20.0%; tolerance 2 pp):
+- At all three loose ceilings the worst drawdown is the March 2020 crash.
+- On those days, 91–100% of the book was locked: positions bought less than 30 days earlier.
+- Zero preventable breaches.
+
+Market-forced path dependence, as in earlier campaigns; not a defect.
+
+**What changes in the conclusions:**
+1. **The bar is now constrained 60/40 at 1.04** (was 1.14). Classical optimizer constrained (0.88) is
+   second.
+2. **Momentum is no longer a strong baseline (0.48).** §7's premise for Phase 4 is gone. R-6's teacher is
+   chosen among 60/40 and the classical optimizer on validation years, and Option B (allocator) gains weight.
+3. **The RL models trained under the old rules lose 0.15–0.25 Sharpe under the corrected ones.** That is
+   expected for policies that relied on daily micro-adjustments the band now suppresses. It is not a
+   verdict on RL under the corrected rules: that needs R-5's retraining.
+4. **New finding: O-2 can leave a strategy in cash for the rest of a window.**
+   - Past the ceiling the risk budget `1 - (1 - D_max) P/V` is negative, so nothing risky is admissible.
+   - O-2 sells toward cash, and a cash book cannot recover the drawdown.
+   - Annual folds: the longest breach rose from 56 to 213 sessions. The constrained baselines averaged
+     84–90% cash in 2018, 2020 and 2022.
+   - Web app (continuous path): the stay lasts until the old peak leaves the 12-month window.
+
+   This is the drawdown definition working as written. Whether re-entry should be allowed earlier is a
+   design question for the user before R-5 (R-Q3).
+5. The event-driven variant lost most of its validation edge under the corrected rules (0.69 → 0.31). R-5
+   decides, after retraining.
+
+**Open decisions before training (R-5):**
+
+| # | Question |
+|---|---|
+| R-Q1 | Band 0.5 or 1 pp (chosen on validation years during R-5) |
+| R-Q2 | Headline metric: continuous path or annual folds |
+| R-Q3 | Past the ceiling, stay de-risked until the drawdown heals (current), or allow controlled re-entry, e.g. after N sessions in cash, or once the stressed loss of a small position fits a recovery budget |
+
+**Paused here, before any training,** as instructed (2026-10-12).
