@@ -414,3 +414,120 @@ built yet.
    baselines whether to make `_hold` return None in the research too. That would change the
    baseline numbers in every report, including the constrained 60/40 bar of 1.14. O-2 (step 1)
    must also cover hold sessions past the ceiling. See `WEBAPP_PLAN.md` Step 3.
+
+## 15. Revision after the web app work (2026-10-11)
+
+Building the web app (`WEBAPP_PLAN.md`) ran the baselines on one continuous 2004–2026 path and
+exposed two problems in the shared simulator. This section revises §14. **Its order of work
+replaces §14's**; §14's specifications (O-2 in particular) still hold unless changed here.
+
+### 15a. What was found
+
+1. **"Hold" trades every day, for every strategy.** The engine executes target *weights* at the
+   next open. A strategy that wants to keep its book asks for its current weights. But prices move
+   overnight, so each "hold" became small buys and sells, and every buy relocked that ETF for 30 days.
+   - Baselines: momentum (D-F, 5% ceiling, 2004–2026) traded on 3,256 of 5,702 sessions. With
+     genuine holds (`engine.hold`) it trades on 214.
+   - **The RL agent is hit harder.** A softmax output never equals the current weights exactly, so
+     the agent cannot hold at all. In `seeds_df` at 16% (test years 2012–2025, N = 30, D_max = 5%),
+     it traded on **49%** of sessions, and on an average day **91%** of its holdings were locked.
+     The agent has been deciding inside an almost permanently locked book. This is likely a main
+     reason it trails the baselines, and fixing it may be worth more than any other item in this
+     plan.
+2. **The corrected baselines moved in both directions; the bar did not simply drop.** Sharpe on
+   the web app's rule set (continuous path, 12-month peak), D_max 5 / 10 / 15%, before → after
+   genuine holds:
+
+   | Strategy | Before | After |
+   |---|---|---|
+   | Momentum | 0.38 / 0.78 / 0.72 | 0.57 / 0.56 / 0.57 |
+   | Equal weight | 0.47 / 0.59 / 0.69 | 0.74 / 0.77 / 0.77 |
+   | Classical optimizer | 0.84 / 0.90 / 0.88 | 0.70 / 0.80 / 0.76 |
+   | 60/40 | 0.80 / 0.80 / 0.90 | 0.79 / 0.88 / 0.81 |
+
+   The research bars quoted earlier need recomputing under the research protocol before they are
+   used again: constrained 60/40 at 1.14 (O-4), and constrained momentum at 1.13 as "the strongest
+   baseline" (§7).
+3. **A never-reset drawdown peak makes long paths meaningless.** On the continuous path, 60/40 at
+   5% stays in capital preservation, 100% cash, from 2009 to 2026. The research avoided this only
+   by evaluating one year at a time. The web app measures drawdown from the highest NAV of the past
+   12 months (`drawdown.peak_window_sessions: 252`, user decision 2026-10-10). The RL environment
+   and its evaluation still use the all-time peak, so what the agent is trained on is not what the
+   app would run.
+4. **Drawdowns still overshoot the ceiling** (21–35% at the 5% ceiling, measured from the 12-month
+   peak, all in 2008–09), because D-F never forces selling. This confirms the need for O-2.
+
+### 15b. Changes to the plan
+
+**R-1 (new, first): a no-trade band in execution, for every strategy and the agent.**
+- **Rule:** if an ETF's target weight is within *b* percentage points of its current weight, that
+  ETF is not traded at all. Its share count stays as it is, and it is not relocked.
+- **What it fixes:**
+  - The baselines' "hold" becomes a genuine no-trade, without the web app's separate `true_hold`
+    patch.
+  - The agent gains, for the first time, the ability to keep a position untouched.
+- **What it is not:** a cost model. It exists because a purchase relocks the position (§3). D-B
+  stands.
+- **Implementation:** an opt-in engine setting with default 0, so the research defaults and config
+  hashes are unchanged. The replay detector and the lock invariants are extended to cover it.
+- **Choosing *b*:** set on validation years. Report the trade frequency and the share of holdings
+  locked as new effectiveness metrics (§5f).
+
+**R-2: recompute every baseline under the research protocol, with R-1, and restate the bars.**
+- Stages 5 and 12 are re-run on the main-line rule set.
+- O-4's bar (constrained 60/40, 1.14) and §7's premise that momentum is the strongest baseline are
+  re-established from the new numbers, on validation years.
+
+**R-3: one drawdown definition: the 12-month rolling peak, everywhere.**
+- The RL environment uses it for the observation (drawdown and headroom), the risk budget, and
+  capital preservation; the evaluation uses it too.
+- **Engine work:** the rolling window of NAVs must be carried through resets and stored in the
+  initial-state reservoir. Today `initial_state` rejects an inherited peak when the window is
+  rolling.
+- **Evaluation:** a continuous multi-year test path becomes meaningful, and it matches the app.
+  The annual folds stay for selection on validation years. **Open decision (R-Q2) below:** which
+  of the two is the headline metric.
+
+**R-4: O-2 as specified in §14 step 1, after R-1.** It must also apply on no-trade sessions: a
+hold past the ceiling may not bypass the risk rule. Once O-2 exists, the web app's `true_hold`
+needs the same treatment, or is replaced by R-1.
+
+**R-5: re-run the Phase 3 comparison on the revised environment, and reopen O-3.**
+- Event-driven decisions had the best validation scores. Much of that may have come from genuine
+  no-trade sessions between decisions, which R-1 now gives the daily environment as well.
+- Compare at equal budget (8%), three seeds each:
+  - daily decisions + R-1 + R-3 (+ O-2);
+  - the same with event-driven decisions (after setting `gamma` and `target_kl` on validation
+    years, §5e).
+- Choose the main line from the result. The old campaigns remain the control.
+
+**R-6: Phase 4 (§7) moves after R-1–R-5, with two changes.**
+- **Imitation needs R-1.** The teacher is the corrected strategy, which trades monthly; without R-1
+  the agent cannot express "hold", so it cannot imitate it.
+- **The teacher is whichever corrected baseline is strongest on validation years (R-2),** not
+  momentum by default. If the corrected baselines are close to one another, Option B (strategy
+  allocator) becomes the more attractive design.
+
+**Unchanged:** D-B (no transaction costs), D-C (one setting, three seeds), D-D (use momentum
+without becoming momentum), D-E (environment before network or algorithm upgrades), D-F (no risk
+increase over budget). All rules carried forward in §14 step 4 still apply.
+
+### 15c. Order of work (replaces §14)
+
+| Step | Work | Compute |
+|---|---|---|
+| 1 | R-1: no-trade band in the engine, tests, choose *b* on validation years | Short (simulation only) |
+| 2 | R-2: recompute the baselines and restate the bars | Short |
+| 3 | R-3: 12-month rolling peak in the environment, reservoir and evaluation | Short (code + tests) |
+| 4 | R-4: O-2 stepwise de-risking, covering no-trade sessions | Short (code + tests) |
+| 5 | R-5: three-seed campaigns to 8% on the revised environment, daily vs event-driven | Training (idle-time sessions) |
+| 6 | R-6: Phase 4 on the chosen main line | Training |
+
+Steps 1–4 are code changes with short validation runs; no long training is needed until step 5.
+
+### 15d. Open decisions (to settle before or during step 1)
+
+| # | Question | Options |
+|---|---|---|
+| R-Q1 | Band width *b* | Set on validation years from a small grid (e.g. 0.5, 1, 2, 3 percentage points), or fix a value up front |
+| R-Q2 | Headline metric | The continuous multi-year test path with the 12-month peak (matches the web app), or the mean of annual test folds (matches every earlier report). Either way, both are reported |
