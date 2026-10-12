@@ -1,0 +1,16 @@
+# The revised main line (MODEL_REDESIGN_PLAN.md section 15): D-F plus
+#   R-1  a no-trade band in execution (a weight change under one percentage point is not
+#        traded, so the position is neither touched nor relocked);
+#   R-3  drawdown measured from the highest NAV of the past 12 months (252 sessions);
+#   R-4  O-2: past the ceiling, every decision cuts the holdings' stressed loss by 20%.
+# The band width was chosen on validation years (section 15, R-Q1; see STATUS.md).
+extends: redesign_df.yaml
+
+execution:
+  no_trade_band: 0.01
+
+drawdown:
+  peak_window_sessions: 252
+
+projection:
+  derisk_step: 0.2

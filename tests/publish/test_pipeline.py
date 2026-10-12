@@ -30,25 +30,23 @@ def momentum(setup):
     return pipeline.run_portfolio(market, resolved, "momentum", 5)[0]
 
 
-def test_webapp_config_uses_a_rolling_peak_and_the_no_risk_increase_rule():
+def test_webapp_config_is_the_research_main_line():
     r = resolve_config(pipeline.Settings.config)
     assert r["drawdown"]["peak_window_sessions"] == 252
     assert r["projection"]["over_budget_rule"] == "no_risk_increase"
+    assert r["projection"]["derisk_step"] > 0
+    assert r["execution"]["no_trade_band"] > 0
+    main_line = resolve_config("config/experiments/redesign_v2.yaml")
+    for k in ("drawdown", "projection", "execution", "lock", "risk"):
+        assert r[k] == main_line[k]
 
 
 def test_a_monthly_strategy_trades_about_monthly(momentum):
-    """Between rebalances a hold must not trade at the next open (the daily top-up bug)."""
+    """Between rebalances a hold must not trade at the next open (the daily top-up bug,
+    fixed by the no-trade band, R-1)."""
     days = {rb.date for rb in momentum.rebalances}
     months = len({(d.year, d.month) for d in momentum.dates})
     assert len(days) <= 2 * months, f"{len(days)} trade days in {months} months"
-
-
-def test_true_hold_returns_none_only_for_the_current_weights():
-    class Ctx:
-        current_weights = np.array([0.5, 0.5])
-
-    assert pipeline.true_hold(lambda s, c: c.current_weights.copy())(None, Ctx) is None
-    assert pipeline.true_hold(lambda s, c: np.array([1.0, 0.0]))(None, Ctx) is not None
 
 
 def test_path_is_consistent_with_the_simulation(momentum):

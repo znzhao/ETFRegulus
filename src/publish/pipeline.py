@@ -55,25 +55,6 @@ def code_info() -> dict:
 
 # --------------------------------------------------------------------------- one portfolio
 
-def true_hold(fn):
-    """Turn a strategy's "keep the current weights" into a genuine no-trade session.
-
-    Between rebalances the baselines ask for the current weights (`_hold`). The engine
-    executes weights at the next open, so any overnight price move turns that request into
-    small buys and sells -- and every buy relocks the ETF. Measured on momentum (5% ceiling,
-    2004-2026): trades on 3,256 of 5,702 sessions. Returning None instead routes the session
-    through `engine.hold`, which only marks the book to the next close. Monthly strategies then
-    trade monthly, as specified. (Safe under the web app's no-risk-increase rule, where
-    holding is always admissible.)
-    """
-    def weights(session, ctx):
-        w = fn(session, ctx)
-        if w is not None and np.array_equal(np.asarray(w, dtype=float), ctx.current_weights):
-            return None
-        return w
-    return weights
-
-
 def _path_from_trajectory(market: MarketData, traj: pd.DataFrame, strategy: str, ceiling: int,
                           initial_cash: float) -> build.PortfolioPath:
     """Session dates, equity, weights and executed trades, with the opening all-cash row."""
@@ -117,7 +98,7 @@ def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: in
     projector = make_projector_from(constraints)
     cfg = build_sim_config(resolved, constraints, max_drawdown=ceiling / 100, seed=42)
     params = resolved.get("baselines", {}).get("params", {}).get(strategy, {})
-    fn = true_hold(BASELINES[strategy].build(market, params))
+    fn = BASELINES[strategy].build(market, params)
     envelope = build_envelope(constraints)
     res = simulate(market, fn, cfg, projector=projector, envelope=envelope)
     if res.diagnostics["lock_violations"] or res.diagnostics["feasibility_violations"]:
