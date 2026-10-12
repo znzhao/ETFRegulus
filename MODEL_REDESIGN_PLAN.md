@@ -541,7 +541,7 @@ Steps 1–4 are code changes with short validation runs; no long training is nee
 | R-1 no-trade band | `execution.no_trade_band`, `engine.advance` → `execute(keep_shares=...)` | On a decision O-2 forced, only small *buys* are suppressed and every sale executes. Without that, forced decisions topped up positions that fell overnight, relocked them, and left them unsellable at the next forced decision. A first test run caught this |
 | R-3 rolling peak in training | `env.reset` restores the peak window via `engine.state_from`; reservoir entries carry `navs` | The new Stage 5 reservoir under `redesign_v2.yaml` (1,626 states, all with a NAV window) is now the latest, so **any** training run will sample from it |
 | R-4 O-2 | `projection.derisk_step`, `AnalyticProjector._derisk_past_ceiling` (the cvxpy oracle shares it) | Past the ceiling, the bound is `max(budget, stress(w_safe), (1 - k) * stress(holdings))`; a proposal over it is blended toward `w_safe`. Event mode decides every session past the ceiling (`environment.preservation_daily`) |
-| Main-line config | `config/experiments/redesign_v2.yaml` (hash `e2445474`), event variant `redesign_v2_event.yaml` | D-F + band 1 pp + 12-month peak + O-2 k = 0.2 |
+| Main-line config | `config/experiments/redesign_v2.yaml` (hash `e2445474`); the event variant was dropped in 15f | D-F + band 1 pp + 12-month peak + O-2 k = 0.2 |
 | Re-evaluation | `scripts/s17_reevaluate.py` | Scores frozen checkpoints under another rule set, in Stage 8 layout, optionally with the full Stage 9–12 report. Re-evaluating `seeds_df` C3 under the old rules reproduced all 84 original trajectories exactly |
 | Fixes found on the way | `strategies._month_ends`; Stage 5 gates | (a) A window ending mid-month treated its last day as a month-end, so in the live app every monthly strategy "rebalanced" daily. (b) Two Stage 5 gates now test only what they are for: the lock gate runs without the band, and the 2022 data check runs on plain 60/40 |
 
@@ -622,3 +622,18 @@ Market-forced path dependence, as in earlier campaigns; not a defect.
 | R-Q3 | Past the ceiling, stay de-risked until the drawdown heals (current), or allow controlled re-entry, e.g. after N sessions in cash, or once the stressed loss of a small position fits a recovery budget |
 
 **Paused here, before any training,** as instructed (2026-10-12).
+
+### 15f. Decisions for R-5 (user, 2026-10-12)
+
+| # | Decision |
+|---|---|
+| R-Q1 | **Band fixed at 1 pp.** No second band is trained |
+| R-Q2 | **Headline metric: the mean of annual test folds**, as in every earlier report and in selection. The continuous path is reported alongside |
+| R-Q3 | **Unchanged for R-5:** past the ceiling, O-2 de-risks and the strategy stays de-risked until the drawdown heals. One change at a time; earlier re-entry can be studied later on its own |
+| O-3 | **Closed: event-driven decisions are dropped.** Only daily decisions are trained. `redesign_v2_event.yaml` is deleted. The event-mode code stays, off by default, so earlier campaigns remain reproducible |
+
+**R-5 as run:**
+- One campaign, `seeds_v2`, on `redesign_v2.yaml`: high_entropy, three seeds (1001–1003), from scratch.
+- It trains to the 2% and 4% checkpoints first. Further budget waits for the user's go-ahead.
+- Controls at equal budget: `seeds_v1` (old environment) and `seeds_df` (D-F only), both re-scored under
+  the corrected rules (15e).
