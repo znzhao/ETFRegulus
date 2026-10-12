@@ -153,3 +153,16 @@ def test_rolling_peak_state_restores_the_nav_window():
     assert list(st.navs) == [120.0, 100.0]
     st = state_from(Ledger(cash=100.0), lm, SimulationConfig(), nav=100.0, peak=120.0)
     assert st.navs is None and st.peak == 120.0
+
+
+def test_a_window_ending_mid_month_does_not_make_its_last_day_a_month_end(market):
+    """The live web app's data always ends today; a monthly strategy must not treat every
+    today as a month-end and rebalance daily."""
+    from src.baselines.strategies import _month_ends
+    s = market.sessions
+    full = _month_ends(s)
+    assert s[-1] in full                                   # 2021-12-31 really is one
+    cut = s[s <= pd.Timestamp("2021-11-15")]
+    ends = _month_ends(cut)
+    assert cut[-1] not in ends
+    assert pd.Timestamp("2021-10-29") in ends

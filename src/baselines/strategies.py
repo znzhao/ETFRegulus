@@ -42,9 +42,27 @@ def _empty(n_assets: int) -> np.ndarray:
 
 
 def _month_ends(sessions: pd.DatetimeIndex) -> set[pd.Timestamp]:
-    """Last session of each calendar month."""
+    """Last session of each calendar month.
+
+    The data's final session is a month-end only if the exchange calendar has no later
+    session in that month. Otherwise a window that stops mid-month -- every day of the
+    live web app -- would treat its last day as a month-end and "rebalance" a monthly
+    strategy every day.
+    """
     s = pd.Series(sessions, index=sessions)
-    return set(s.groupby([sessions.year, sessions.month]).max().to_numpy())
+    ends = set(s.groupby([sessions.year, sessions.month]).max().to_numpy())
+    if len(sessions):
+        last = pd.Timestamp(sessions[-1])
+        month_end = last + pd.offsets.MonthEnd(0)
+        if last.normalize() < month_end.normalize():
+            from src.data.calendar import get_calendar
+
+            later = get_calendar("XNYS").sessions_in_range(
+                (last + pd.Timedelta(days=1)).date().isoformat(), month_end.date().isoformat())
+            if len(later):
+                ends.discard(last.to_datetime64())
+                ends.discard(last)
+    return ends
 
 
 def _hold(ctx: StepContext) -> np.ndarray:
