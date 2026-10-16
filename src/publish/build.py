@@ -23,8 +23,9 @@ EQ_DIGITS = 6           # significant digits of the equity curve
 RISK_STATES = ("normal", "over_budget", "capital_preservation")
 
 
-def portfolio_id(strategy: str, ceiling: int) -> str:
-    return f"{strategy}_D{ceiling}"
+def portfolio_id(strategy: str, ceiling: int, holdings: int = 0) -> str:
+    """`<strategy>_D<ceiling>`, plus `_K<n>` when at most n ETFs may be held (0 = no limit)."""
+    return f"{strategy}_D{ceiling}" + (f"_K{holdings}" if holdings else "")
 
 
 def iso(d: dt.date) -> str:
@@ -75,10 +76,11 @@ class PortfolioPath:
     #: The decision taken at the final close, for the next open (1 + n_assets, CASH first).
     #: None means "hold the current book".
     target: np.ndarray | None = None
+    holdings: int = 0               # most ETFs held at once; 0 = no limit
 
     @property
     def id(self) -> str:
-        return portfolio_id(self.strategy, self.ceiling)
+        return portfolio_id(self.strategy, self.ceiling, self.holdings)
 
 
 # --------------------------------------------------------------------------- numbers
@@ -189,7 +191,7 @@ def backtest_doc(p: PortfolioPath) -> dict:
     sample = weekly_sample(p.dates)
     return {
         "schema_version": SCHEMA_VERSION,
-        "portfolio": p.id, "strategy": p.strategy, "ceiling": p.ceiling,
+        "portfolio": p.id, "strategy": p.strategy, "ceiling": p.ceiling, "holdings": p.holdings,
         "start": iso(p.dates[0]), "end": iso(p.dates[-1]),
         "dates": [iso(d) for d in p.dates],
         "equity": [_sig(x) for x in eq],
@@ -214,7 +216,7 @@ def today_entry(p: PortfolioPath) -> dict:
     plan = current if p.target is None else np.asarray(p.target, dtype=float)
     held = weight_dict(current, p.assets)
     return {
-        "strategy": p.strategy, "ceiling": p.ceiling,
+        "strategy": p.strategy, "ceiling": p.ceiling, "holdings": p.holdings,
         "weights": weight_dict(plan, p.assets),
         "current_weights": held,
         "next_trades": [c.doc() for c in trades(current, plan, p.assets)],

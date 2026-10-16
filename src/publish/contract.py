@@ -15,6 +15,8 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from src.publish.build import portfolio_id
+
 SCHEMA_DIR = Path(__file__).with_name("schema")
 KINDS = ("manifest", "universe", "today", "backtest", "risk", "live")
 WEIGHT_TOL = 1e-3
@@ -69,9 +71,10 @@ def validate_site(data_dir: str | Path) -> list[str]:
     files = man["files"]
     uni, today, risk, live = (load(files[k], k) for k in ("universe", "today", "risk", "live"))
 
-    expected = {f"{s['id']}_D{c}" for s in man["strategies"] for c in man["ceilings"]}
+    expected = {portfolio_id(s["id"], c, k) for s in man["strategies"] for c in man["ceilings"]
+                for k in man.get("holdings", [0])}
     if set(man["portfolios"]) != expected:
-        errs.append(f"manifest: portfolios do not match strategies x ceilings "
+        errs.append(f"manifest: portfolios do not match strategies x ceilings x holdings "
                     f"(missing {sorted(expected - set(man['portfolios']))}, "
                     f"extra {sorted(set(man['portfolios']) - expected)})")
     if set(files["backtest"]) != set(man["portfolios"]):
@@ -97,8 +100,8 @@ def validate_site(data_dir: str | Path) -> list[str]:
         if set(today["portfolios"]) != set(man["portfolios"]):
             errs.append("today: portfolios do not match the manifest")
         for pid, p in today["portfolios"].items():
-            if pid != f"{p['strategy']}_D{p['ceiling']}":
-                errs.append(f"today/{pid}: id does not match strategy and ceiling")
+            if pid != portfolio_id(p["strategy"], p["ceiling"], p.get("holdings", 0)):
+                errs.append(f"today/{pid}: id does not match strategy, ceiling and holdings")
             if tickers:
                 errs.extend(_weights_ok(f"today/{pid}", p["weights"], known))
                 errs.extend(_weights_ok(f"today/{pid}/current", p["current_weights"], known))

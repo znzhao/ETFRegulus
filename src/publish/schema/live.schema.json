@@ -10,7 +10,7 @@
     "schema_version": {"const": 1},
     "launch_date": {"oneOf": [{"$ref": "#/$defs/date"}, {"type": "null"}], "description": "null before launch."},
     "portfolios": {
-      "type": "object", "propertyNames": {"pattern": "^[a-z0-9_]+_D\\d{1,3}$"},
+      "type": "object", "propertyNames": {"pattern": "^[a-z0-9_]+_D\\d{1,3}(_K\\d{1,2})?$"},
       "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/entry"}}
     }
   },

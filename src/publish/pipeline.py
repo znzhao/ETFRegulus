@@ -9,6 +9,7 @@ is projected without being executed and published as "today's plan".
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import subprocess
 import time
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from src.sim.runner import build_constraints, build_envelope, build_sim_config, 
 from src.sim.simulator import MarketData, simulate
 
 CEILINGS = (5, 10, 15)
+HOLDINGS = (0, 3, 5, 8)      # most ETFs held at once; 0 = no limit
 CALENDAR_AHEAD = 90          # sessions of future calendar shipped for lock expiry dates
 RISK_DECIMALS = 4
 
@@ -37,6 +39,7 @@ class Settings:
     start: str = "2004-01-01"
     end: str | None = None
     ceilings: tuple[int, ...] = CEILINGS
+    holdings: tuple[int, ...] = HOLDINGS
     strategies: tuple[str, ...] = tuple(names.STRATEGIES)
 
 
@@ -135,11 +138,13 @@ def _path_from_trajectory(market: MarketData, traj: pd.DataFrame, strategy: str,
                                weights=w, assets=universe, rebalances=rebalances, locks=locks)
 
 
-def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: int):
-    """Simulate one strategy x ceiling and plan its next decision. Returns (path, envelope)."""
+def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: int, holdings: int = 0):
+    """Simulate one strategy x ceiling x holdings limit and plan its next decision.
+    Returns (path, envelope)."""
     constraints = build_constraints(resolved)
     projector = make_projector_from(constraints)
-    cfg = build_sim_config(resolved, constraints, max_drawdown=ceiling / 100, seed=42)
+    cfg = build_sim_config(resolved, constraints, max_drawdown=ceiling / 100, seed=42,
+                           max_holdings=holdings)
     if strategy == RL_STRATEGY:
         fn = rl_weight_source(market, resolved, hold_days=cfg.hold_days, max_drawdown=ceiling / 100)
     else:
@@ -148,9 +153,10 @@ def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: in
     envelope = build_envelope(constraints)
     res = simulate(market, fn, cfg, projector=projector, envelope=envelope)
     if res.diagnostics["lock_violations"] or res.diagnostics["feasibility_violations"]:
-        raise RuntimeError(f"{strategy} D{ceiling}: constraint violations in the simulation")
+        raise RuntimeError(f"{strategy} D{ceiling} K{holdings}: constraint violations in the simulation")
 
     path = _path_from_trajectory(market, res.trajectory, strategy, ceiling, cfg.initial_cash)
+    path.holdings = holdings
     dec, projected = plan_next(market, res.final_state, cfg, len(market.sessions) - 1, fn, projector,
                                envelope=envelope)
     diag = projected.diagnostics
@@ -213,9 +219,9 @@ def build_site(settings: Settings, log: Callable[[str], None] = print) -> dict[s
 
     paths, envelope = [], None
     for strategy in settings.strategies:
-        for c in settings.ceilings:
+        for c, k in itertools.product(settings.ceilings, settings.holdings):
             t0 = time.time()
-            p, envelope = run_portfolio(market, resolved, strategy, c)
+            p, envelope = run_portfolio(market, resolved, strategy, c, k)
             paths.append(p)
             m = build.metrics(p.equity / p.equity[0])
             log(f"  {p.id:<26} {time.time() - t0:5.1f}s  Sharpe {m['sharpe']:5.2f}  maxDD {m['max_drawdown']:.3f}  "
@@ -234,6 +240,7 @@ def build_site(settings: Settings, log: Callable[[str], None] = print) -> dict[s
             "backtest_start": paths[0].dates[0].isoformat(),
             "lock_days": int(build_sim_config(resolved, build_constraints(resolved)).hold_days),
             "ceilings": list(settings.ceilings),
+            "holdings": list(settings.holdings),
             "strategies": [s for s in names.strategy_entries() if s["id"] in settings.strategies],
             "portfolios": [p.id for p in paths], "files": files,
         },

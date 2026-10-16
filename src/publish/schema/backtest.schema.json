@@ -9,9 +9,10 @@
                "weights", "rebalances", "metrics", "monthly_returns", "annual_returns"],
   "properties": {
     "schema_version": {"const": 1},
-    "portfolio": {"type": "string", "pattern": "^[a-z0-9_]+_D\\d{1,3}$"},
+    "portfolio": {"type": "string", "pattern": "^[a-z0-9_]+_D\\d{1,3}(_K\\d{1,2})?$"},
     "strategy": {"type": "string", "pattern": "^[a-z0-9_]+$"},
     "ceiling": {"type": "integer", "minimum": 1, "maximum": 100},
+    "holdings": {"type": "integer", "minimum": 0, "maximum": 24, "description": "Most ETFs (cash aside) held at once; 0 = no limit."},
     "start": {"$ref": "#/$defs/date"},
     "end": {"$ref": "#/$defs/date"},
     "dates": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/date"}},

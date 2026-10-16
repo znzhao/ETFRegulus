@@ -37,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--end", default=None, help="last session to use (default: all curated data)")
     ap.add_argument("--only", default=None, help="comma-separated strategies (default: all six)")
     ap.add_argument("--ceilings", default=",".join(map(str, pipeline.CEILINGS)))
+    ap.add_argument("--holdings", default=",".join(map(str, pipeline.HOLDINGS)),
+                    help="holdings limits (most ETFs held at once); 0 = no limit")
     ap.add_argument("--log-dir", type=Path, default=None,
                     help="append-only live log (WEBAPP_PLAN.md Step 4); appended only once the output is valid")
     a = ap.parse_args(argv)
@@ -44,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = pipeline.Settings(
         config=a.config, start=a.start, end=a.end,
         ceilings=tuple(int(c) for c in a.ceilings.split(",")),
+        holdings=tuple(int(k) for k in a.holdings.split(",")),
         strategies=tuple(a.only.split(",")) if a.only else pipeline.Settings.strategies)
     t0 = time.time()
     docs = pipeline.build_site(settings)
