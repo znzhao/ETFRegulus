@@ -117,6 +117,20 @@ class EnvConfig:
     dsr_eta: float = 1.0 / 126
     dsr_var_floor: float = 0.003 ** 2
     dsr_var_init: float = 0.01 ** 2
+    #: Training-only augmentation: Gaussian noise of this standard deviation (in the scaled
+    #: feature units) added to the MARKET features of every observation, never to the
+    #: portfolio or parameter fields. Keeps the policy from memorizing exact feature
+    #: values of the few historical paths it replays. 0 = off; evaluation never adds it.
+    obs_noise: float = 0.0
+
+
+def market_feature_mask(spec) -> np.ndarray:
+    """True at the market-feature positions of an observation (global block and the
+    per-asset market fields); False at portfolio and parameter fields."""
+    market = set(spec.per_asset_market)
+    names = spec.names or spec.build_names()
+    return np.array([n.startswith("g:") or (n.startswith("a:") and n.split(":", 2)[2] in market)
+                     for n in names])
 
 
 class InvariantViolation(AssertionError):
@@ -183,6 +197,7 @@ class ETFAllocationEnv(gym.Env):
 
         self._window = self._resolve_window(cfg.window)
         self._obs_buffer = np.zeros(spec.size, dtype=np.float32)
+        self._market_mask: np.ndarray | None = None
         self.episode: EpisodeSpec | None = None
         self.state: EngineState | None = None
         self.violations: list[str] = []
@@ -372,7 +387,7 @@ class ETFAllocationEnv(gym.Env):
         return float(d)
 
     def _observe(self, dec) -> np.ndarray:
-        return build_observation(
+        obs = build_observation(
             self.obs_spec, self.store, self._row + self._feature_offset, dec.ctx,
             hold_days=self.episode.hold_days if self.episode else self.sim_cfg.hold_days,
             max_drawdown=(self.episode.max_drawdown if self.episode
@@ -380,6 +395,12 @@ class ETFAllocationEnv(gym.Env):
             nav_at_reset=self._nav_at_reset, out=self._obs_buffer,
             max_holdings=self.sim_cfg.max_holdings,
         ).copy()
+        if self.cfg.obs_noise > 0:
+            if self._market_mask is None:
+                self._market_mask = market_feature_mask(self.obs_spec)
+            obs[self._market_mask] += self.np_random.normal(
+                0.0, self.cfg.obs_noise, int(self._market_mask.sum())).astype(np.float32)
+        return obs
 
     def _info_from(self, dec) -> dict:
         return {

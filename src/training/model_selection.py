@@ -162,6 +162,8 @@ def default_candidates(n: int, base_seed: int = 0) -> list[Candidate]:
         {"name": "high_entropy_slow", "ent_coef": 0.02, "learning_rate": 1.0e-4},
         {"name": "fast_lr", "ent_coef": 0.005, "learning_rate": 1.0e-3},
         {"name": "low_entropy", "ent_coef": 0.001, "learning_rate": 3.0e-4},
+        # Anti-overfitting (seeds_v4): a flatter policy that memorizes less.
+        {"name": "very_high_entropy", "ent_coef": 0.05, "learning_rate": 3.0e-4},
     ]
     out = []
     for i, spec in enumerate(grid[:max(1, n)]):

@@ -1,0 +1,7 @@
+# Anti-overfitting variant of redesign_v3 (2026-10-16): Gaussian noise (sd 0.1, scaled
+# units) on the market features during training only. Planned campaign seeds_v4:
+# setting very_high_entropy (ent_coef 0.05), 10 seeds, stopped at about 5% of the budget.
+extends: redesign_v3.yaml
+
+environment:
+  obs_noise: 0.1

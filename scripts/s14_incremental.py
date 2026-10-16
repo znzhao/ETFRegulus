@@ -232,7 +232,7 @@ def init_fresh(args, resolved: dict, chash: str, log: Log) -> None:
     cdir = campaign_dir(args.campaign)
     if (cdir / "campaign.json").exists():
         raise CampaignError(f"campaign {args.campaign!r} already exists at {cdir}")
-    settings = {c.name: c.params for c in default_candidates(6)}
+    settings = {c.name: c.params for c in default_candidates(99)}
     if args.setting not in settings:
         raise CampaignError(f"unknown setting {args.setting!r}; one of {sorted(settings)}")
     hp = {k: v for k, v in settings[args.setting].items() if k != "seed"}

@@ -106,6 +106,7 @@ def env_config_from(resolved: dict, constraints) -> EnvConfig:
         dsr_eta=float(env.get("dsr_eta", 1.0 / 126)),
         dsr_var_floor=float(env.get("dsr_var_floor", 0.003 ** 2)),
         dsr_var_init=float(env.get("dsr_var_init", 0.01 ** 2)),
+        obs_noise=float(env.get("obs_noise", 0.0)),
     )
 
 

@@ -65,3 +65,16 @@ def test_dsr_matches_the_formula_and_log_return_is_unchanged(bundle):
     _, info = plain.reset(seed=4)
     _, r, _, _, info2 = plain.step(np.zeros(plain.action_space.shape))
     assert r == pytest.approx(np.log(info2["nav"] / info["nav"]))
+
+
+@needs_data
+def test_observation_noise_touches_market_features_only(bundle):
+    from src.env.etf_env import market_feature_mask
+    quiet, spec = _env(bundle, flat_start=True)
+    noisy, _ = _env(bundle, flat_start=True, obs_noise=0.1)
+    a, _ = quiet.reset(seed=5)
+    b, _ = noisy.reset(seed=5)
+    mask = market_feature_mask(spec)
+    assert mask.sum() > 0 and (~mask).sum() > 0
+    np.testing.assert_array_equal(a[~mask], b[~mask])
+    assert (b[mask] - a[mask]).std() == pytest.approx(0.1, rel=0.2)
