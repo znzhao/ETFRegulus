@@ -70,6 +70,18 @@ def validate_site(data_dir: str | Path) -> list[str]:
     date = man["data_date"]
     files = man["files"]
     uni, today, risk, live = (load(files[k], k) for k in ("universe", "today", "risk", "live"))
+    if "rl" in files:
+        rl = load(files["rl"], "rl")
+        if rl:
+            if rl["data_date"] != date:
+                errs.append(f"rl: data_date {rl['data_date']} != manifest {date}")
+            K = len(rl["tickers"])
+            inp = rl["inputs"]
+            if (len(inp["global"]) != rl["n_global"] or len(inp["available"]) != K
+                    or len(inp["per_asset"]) != K or any(len(r) != rl["n_market"] for r in inp["per_asset"])):
+                errs.append("rl: inputs do not match the declared layout")
+            if uni and rl["tickers"] != [a["ticker"] for a in uni["assets"]]:
+                errs.append("rl: tickers do not match the universe")
 
     expected = {portfolio_id(s["id"], c, k) for s in man["strategies"] for c in man["ceilings"]
                 for k in man.get("holdings", [0])}

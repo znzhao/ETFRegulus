@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The RL model for the browser (real-holdings mode)",
+  "description": "Actor weights of every seed (base64 little-endian float32), the scaled market features of data_date, and the observation layout. See src/publish/rl_live.py.",
+  "type": "object",
+  "required": ["schema_version", "data_date", "model", "tickers", "n_market", "n_per_asset", "n_global",
+               "n_portfolio", "holdings_param", "hold_days_divisor", "clip", "logit_scale", "mask_logit",
+               "rules", "inputs", "seeds"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "data_date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "model": {"type": "object"},
+    "tickers": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "n_market": {"type": "integer", "minimum": 0},
+    "n_per_asset": {"type": "integer", "minimum": 1},
+    "n_global": {"type": "integer", "minimum": 0},
+    "n_portfolio": {"type": "integer", "minimum": 1},
+    "holdings_param": {"type": "boolean"},
+    "hold_days_divisor": {"type": "number"},
+    "clip": {"type": "number"},
+    "logit_scale": {"type": "number"},
+    "mask_logit": {"type": "number"},
+    "rules": {
+      "type": "object", "required": ["no_trade_band", "derisk_step", "over_budget_rule"],
+      "properties": {"no_trade_band": {"type": "number"}, "derisk_step": {"type": "number"},
+                     "over_budget_rule": {"type": "string"}}
+    },
+    "inputs": {
+      "type": "object", "required": ["global", "per_asset", "available"],
+      "properties": {
+        "global": {"type": "array", "items": {"type": "number"}},
+        "per_asset": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+        "available": {"type": "array", "items": {"type": "boolean"}}
+      }
+    },
+    "seeds": {"type": "array", "minItems": 1, "items": {"type": "object"}}
+  }
+}

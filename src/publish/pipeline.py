@@ -100,6 +100,28 @@ def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_
     return _YearlyPolicySource(source)
 
 
+def rl_doc(market: MarketData, resolved: dict, data_date: dt.date) -> dict:
+    """The model for the browser's real-holdings mode (`src.publish.rl_live`)."""
+    import json as _json
+
+    from src.env.feature_store import build_store
+    from src.env.observation import ObservationSpec
+    from src.evaluation.rollout import load_policy
+    from src.publish import rl_live
+
+    spec = ObservationSpec.from_config(resolved, list(market.universe))
+    store = build_store(spec, market.sessions, fold_id=RL_FOLD, scalers_dir=RL_MODEL_DIR)
+    models = load_policy(sorted(p for p in RL_MODEL_DIR.iterdir() if p.is_dir()))
+    constraints = build_constraints(resolved)
+    rules = {"no_trade_band": float(constraints.execution.no_trade_band),
+             "derisk_step": float(constraints.projection.derisk_step),
+             "over_budget_rule": constraints.projection.over_budget_rule,
+             "alpha_tolerance": float(constraints.projection.alpha_tolerance)}
+    meta = _json.loads((RL_MODEL_DIR / "model.json").read_text(encoding="utf-8"))
+    return rl_live.model_doc(models, spec, store, market, data_date=data_date, meta=meta,
+                             rules=rules, schema_version=build.SCHEMA_VERSION)
+
+
 # --------------------------------------------------------------------------- one portfolio
 
 def _path_from_trajectory(market: MarketData, traj: pd.DataFrame, strategy: str, ceiling: int,
@@ -231,6 +253,8 @@ def build_site(settings: Settings, log: Callable[[str], None] = print) -> dict[s
 
     files = {"universe": "universe.json", "today": "today.json", "risk": "risk.json",
              "live": "live/index.json", "backtest": {p.id: f"backtest/{p.id}.json" for p in paths}}
+    if RL_STRATEGY in settings.strategies:
+        files["rl"] = "rl/model.json"
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     docs = {
         "manifest.json": {
@@ -252,6 +276,8 @@ def build_site(settings: Settings, log: Callable[[str], None] = print) -> dict[s
         # Step 4 fills the live record from the append-only log.
         files["live"]: {"schema_version": build.SCHEMA_VERSION, "launch_date": None, "portfolios": {}},
     }
+    if "rl" in files:
+        docs[files["rl"]] = rl_doc(market, resolved, data_date)
     for p in paths:
         docs[files["backtest"][p.id]] = build.backtest_doc(p)
     return docs

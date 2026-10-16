@@ -167,6 +167,24 @@ def cap_holdings(a_raw: np.ndarray, lower_w: np.ndarray, current_w: np.ndarray,
     return a
 
 
+def exit_dropped(weights: np.ndarray, capped: np.ndarray, lower_w: np.ndarray,
+                 k: int) -> np.ndarray:
+    """After projection, hold the ETFs `cap_holdings` dropped at zero, in cash.
+
+    Over the risk budget the projection blends the proposal back toward the current book,
+    which re-admits ETFs the limit dropped. Their weight goes to cash instead -- an exit,
+    which can only lower exposure. Locked positions are untouched. k <= 0: unchanged.
+    """
+    if k <= 0:
+        return weights
+    w = np.asarray(weights, dtype=float).copy()
+    drop = (np.asarray(capped)[1:] <= 1e-12) & (np.asarray(lower_w)[1:] <= 1e-12) & (w[1:] > 0)
+    if drop.any():
+        w[0] += float(w[1:][drop].sum())
+        w[1:][drop] = 0.0
+    return w
+
+
 def advance(
     market: MarketData, st: EngineState, cfg: SimulationConfig, i: int,
     dec: Decision, a_raw: np.ndarray, projector: FeasibilityProjector,
@@ -188,6 +206,7 @@ def advance(
         current_weights=dec.ctx.current_weights,
     )
     diag: ProjectionDiagnostics = projected.diagnostics
+    projected.weights = exit_dropped(projected.weights, a_raw, dec.lower_w, cfg.max_holdings)
     target = {t: float(projected.weights[j + 1]) for j, t in enumerate(universe)}
 
     nxt = i + 1
@@ -285,6 +304,7 @@ def plan_next(market: MarketData, st: EngineState, cfg: SimulationConfig, i: int
         capital_preservation=dec.capital_preservation,
         current_weights=dec.ctx.current_weights,
     )
+    projected.weights = exit_dropped(projected.weights, a_raw, dec.lower_w, cfg.max_holdings)
     return dec, projected
 
 

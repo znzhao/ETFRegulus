@@ -62,3 +62,13 @@ def test_simulation_never_holds_more_than_k(name, k):
     assert held.max() == k or name == "momentum"
     assert res.diagnostics["lock_violations"] == 0
     assert res.diagnostics["feasibility_violations"] == 0
+
+
+def test_exit_dropped_moves_readmitted_weight_to_cash():
+    from src.sim.engine import exit_dropped
+    capped = np.array([0.2, 0.5, 0.0, 0.3, 0.0])
+    lower = np.array([0, 0, 0, 0, 0.1])                 # ETF 3 is locked
+    projected = np.array([0.1, 0.4, 0.2, 0.2, 0.1])      # the blend re-admitted ETF 1
+    out = exit_dropped(projected, capped, lower, 2)
+    np.testing.assert_allclose(out, [0.3, 0.4, 0.0, 0.2, 0.1])
+    np.testing.assert_array_equal(exit_dropped(projected, capped, lower, 0), projected)

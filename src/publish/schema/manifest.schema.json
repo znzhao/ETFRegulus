@@ -62,6 +62,7 @@
         "today": {"$ref": "#/$defs/path"},
         "risk": {"$ref": "#/$defs/path"},
         "live": {"$ref": "#/$defs/path"},
+        "rl": {"$ref": "#/$defs/path", "description": "The RL model for real-holdings mode, when the RL strategy is published."},
         "backtest": {"type": "object", "propertyNames": {"$ref": "#/$defs/portfolio_id"},
                      "additionalProperties": {"$ref": "#/$defs/path"}}
       }
