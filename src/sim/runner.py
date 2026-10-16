@@ -53,7 +53,8 @@ def build_envelope(constraints: ConstraintsConfig) -> RiskEnvelope:
 
 
 def build_sim_config(resolved: dict, constraints: ConstraintsConfig, *,
-                     hold_days=None, max_drawdown=None, seed=42) -> SimulationConfig:
+                     hold_days=None, max_drawdown=None, seed=42,
+                     max_holdings=None) -> SimulationConfig:
     sim = resolved.get("simulation", {})
     return SimulationConfig(
         hold_days=int(hold_days if hold_days is not None
@@ -69,6 +70,8 @@ def build_sim_config(resolved: dict, constraints: ConstraintsConfig, *,
         risk_lookback=int(sim.get("risk_lookback", 756)),
         peak_window=int(constraints.drawdown.peak_window_sessions),
         no_trade_band=float(constraints.execution.no_trade_band),
+        max_holdings=int(max_holdings if max_holdings is not None
+                         else constraints.execution.max_holdings),
     )
 
 

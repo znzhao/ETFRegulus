@@ -1,0 +1,4 @@
+# Holdings limit (the user's request, 2026-10-16): the main line with at most 8 ETFs held.
+extends: redesign_v2.yaml
+execution:
+  max_holdings: 8

@@ -266,6 +266,8 @@ class ExecutionSpec:
     #: its share count is kept and it is not relocked. Not a cost model -- it exists
     #: because every purchase relocks the position. 0 = off.
     no_trade_band: float = 0.0
+    #: The most ETFs (cash aside) a portfolio may hold at once. 0 = no limit.
+    max_holdings: int = 0
 
 
 @dataclass(frozen=True)

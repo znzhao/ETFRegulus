@@ -150,6 +150,8 @@ class SimulationConfig:
     peak_window: int = 0
     #: R-1 no-trade band, in weight units (see `ExecutionSpec.no_trade_band`). 0 = off.
     no_trade_band: float = 0.0
+    #: The most ETFs (cash aside) held at once; 0 = no limit. See `engine.cap_holdings`.
+    max_holdings: int = 0
 
 
 @dataclass

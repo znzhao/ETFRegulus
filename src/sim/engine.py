@@ -138,6 +138,35 @@ def observe(
     )
 
 
+def cap_holdings(a_raw: np.ndarray, lower_w: np.ndarray, current_w: np.ndarray,
+                 k: int) -> np.ndarray:
+    """Keep at most `k` ETFs in a proposal (index 0 is cash and does not count).
+
+    Locked positions cannot be sold, so they are kept first; the remaining places go to
+    the largest proposed weights, an ETF already held winning a tie (no needless swap).
+    The dropped weight is shared among the kept ETFs in proportion, so the invested
+    share is unchanged; with nothing kept it goes to cash. k <= 0: unchanged.
+    """
+    a = np.asarray(a_raw, dtype=float).copy()
+    risky = a[1:]
+    if k <= 0 or np.count_nonzero(risky > 1e-12) <= k:
+        return a
+    locked = lower_w[1:] > 1e-12
+    held = current_w[1:] > 1e-12
+    order = sorted((j for j in range(len(risky)) if risky[j] > 1e-12 or locked[j]),
+                   key=lambda j: (not locked[j], -risky[j], not held[j], j))
+    keep = np.zeros(len(risky), dtype=bool)
+    keep[order[:max(k, int(locked.sum()))]] = True
+    dropped = float(risky[~keep].sum())
+    risky[~keep] = 0.0
+    kept = float(risky.sum())
+    if kept > 1e-12:
+        risky *= (kept + dropped) / kept
+    else:
+        a[0] += dropped
+    return a
+
+
 def advance(
     market: MarketData, st: EngineState, cfg: SimulationConfig, i: int,
     dec: Decision, a_raw: np.ndarray, projector: FeasibilityProjector,
@@ -151,6 +180,7 @@ def advance(
     a_raw = np.asarray(a_raw, dtype=float)
     if a_raw.shape != (K + 1,):
         raise ValueError(f"action has shape {a_raw.shape}, expected {(K + 1,)}")
+    a_raw = cap_holdings(a_raw, dec.lower_w, dec.ctx.current_weights, cfg.max_holdings)
 
     projected = projector.project(
         a_raw, lower_bounds=dec.lower_w, available=dec.avail_full, risk=dec.risk_model,
@@ -194,6 +224,9 @@ def advance(
         for j, t in enumerate(universe):
             gap = float(projected.weights[j + 1]) - float(cur_w[j + 1])
             small = abs(gap) < cfg.no_trade_band
+            # A full exit always executes, or the holdings limit could not be met.
+            if cfg.max_holdings > 0 and float(projected.weights[j + 1]) <= 1e-12:
+                small = False
             if small and (not diag.derisk_forced or gap >= 0):
                 keep[t] = st.ledger.get(t)
                 if abs(gap) > 1e-9:
@@ -246,6 +279,7 @@ def plan_next(market: MarketData, st: EngineState, cfg: SimulationConfig, i: int
     dec = observe(market, st, cfg, i, envelope=envelope)
     proposal = weight_fn(market.sessions[i], dec.ctx)
     a_raw = np.asarray(dec.ctx.current_weights if proposal is None else proposal, dtype=float)
+    a_raw = cap_holdings(a_raw, dec.lower_w, dec.ctx.current_weights, cfg.max_holdings)
     projected = projector.project(
         a_raw, lower_bounds=dec.lower_w, available=dec.avail_full, risk=dec.risk_model,
         capital_preservation=dec.capital_preservation,
