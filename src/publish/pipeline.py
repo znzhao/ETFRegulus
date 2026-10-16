@@ -53,6 +53,49 @@ def code_info() -> dict:
             "commit": _git("rev-parse", "--short=7", "HEAD") or "0000000"}
 
 
+# --------------------------------------------------------------------------- the RL model
+
+RL_STRATEGY = "rl"
+RL_MODEL_DIR = Path("models/webapp/seeds_v2_C5bb")
+RL_FOLD = "fold_2025"
+
+
+class _YearlyPolicySource:
+    """The trained ensemble as a weight source over a multi-year path.
+
+    The policy learned on episodes of at most two years, and two of its inputs are the NAV
+    and the peak relative to the NAV the episode started at. Over a 20-year path that
+    ratio leaves anything seen in training, so the reference NAV restarts every calendar
+    year, as each walk-forward test year does.
+    """
+
+    def __init__(self, source):
+        self.source, self.year = source, None
+
+    def __call__(self, session, ctx):
+        if session.year != self.year:
+            self.year = session.year
+            self.source._nav_at_reset = float(ctx.nav)
+        return self.source(session, ctx)
+
+
+def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_drawdown: float):
+    from src.env.factory import env_config_from
+    from src.env.feature_store import build_store
+    from src.env.observation import ObservationSpec
+    from src.evaluation.rollout import PolicyWeightSource, load_policy
+
+    spec = ObservationSpec.from_config(resolved, list(market.universe))
+    store = build_store(spec, market.sessions, fold_id=RL_FOLD, scalers_dir=RL_MODEL_DIR)
+    env_cfg = env_config_from(resolved, build_constraints(resolved))
+    models = load_policy(sorted(p for p in RL_MODEL_DIR.iterdir() if p.is_dir()))
+    source = PolicyWeightSource(models, spec, store, market, hold_days=hold_days,
+                                max_drawdown=max_drawdown, decision_cadence=env_cfg.decision_cadence,
+                                preservation_daily=env_cfg.preservation_daily,
+                                action_mode=env_cfg.action_mode)
+    return _YearlyPolicySource(source)
+
+
 # --------------------------------------------------------------------------- one portfolio
 
 def _path_from_trajectory(market: MarketData, traj: pd.DataFrame, strategy: str, ceiling: int,
@@ -97,8 +140,11 @@ def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: in
     constraints = build_constraints(resolved)
     projector = make_projector_from(constraints)
     cfg = build_sim_config(resolved, constraints, max_drawdown=ceiling / 100, seed=42)
-    params = resolved.get("baselines", {}).get("params", {}).get(strategy, {})
-    fn = BASELINES[strategy].build(market, params)
+    if strategy == RL_STRATEGY:
+        fn = rl_weight_source(market, resolved, hold_days=cfg.hold_days, max_drawdown=ceiling / 100)
+    else:
+        params = resolved.get("baselines", {}).get("params", {}).get(strategy, {})
+        fn = BASELINES[strategy].build(market, params)
     envelope = build_envelope(constraints)
     res = simulate(market, fn, cfg, projector=projector, envelope=envelope)
     if res.diagnostics["lock_violations"] or res.diagnostics["feasibility_violations"]:

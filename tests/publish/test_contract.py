@@ -48,7 +48,7 @@ def test_schemas_are_valid_json_schema():
 def test_fake_site_is_valid(site):
     assert contract.validate_site(site) == []
     man = json.loads((site / "manifest.json").read_text(encoding="utf-8"))
-    assert len(man["portfolios"]) == 18
+    assert len(man["portfolios"]) == 21          # 7 strategies (6 baselines + RL) x 3 ceilings
 
 
 def test_failed_variant_is_valid_and_one_session_older(tmp_path):

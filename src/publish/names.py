@@ -35,6 +35,12 @@ TICKERS: dict[str, tuple[str, str]] = {
 
 # Order is the display order in the app.
 STRATEGIES: dict[str, dict] = {
+    "rl": {
+        "name": ("强化学习模型", "RL model"),
+        "description": ("训练好的强化学习模型（3 个种子的平均组合），每个交易日收盘后决定持仓。用 2023 年及以前的数据训练、2024 年验证；2025 年以前的历史与训练数据重叠，不是真正的样本外表现。",
+                        "The trained reinforcement-learning model (the average portfolio of 3 seeds), deciding holdings after every close. Trained on data through 2023 and validated on 2024; history before 2025 overlaps its training data and is not out-of-sample."),
+        "color": "#3d3a8c",
+    },
     "spy_tlt_60_40": {
         "name": ("60/40 股债", "60/40 SPY-TLT"),
         "description": ("60% 标普 500（SPY）+ 40% 长期美债（TLT）。每月末检查，偏离目标超过 5 个百分点才再平衡。",
