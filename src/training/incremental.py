@@ -60,7 +60,12 @@ class CampaignError(RuntimeError):
 
 
 def checkpoint_schedule(total_timesteps: int, rollout_size: int,
-                        pcts: tuple[int, ...] = CHECKPOINT_PCTS) -> list[dict]:
+                        pcts: tuple[int, ...] = CHECKPOINT_PCTS, *,
+                        every_rollout: bool = False) -> list[dict]:
+    if every_rollout:
+        n = math.ceil(total_timesteps / rollout_size)
+        return [{"label": f"C{i}", "pct": round(100 * (i + 1) / n, 1), "rollouts": i + 1,
+                 "timesteps": (i + 1) * rollout_size} for i in range(n)]
     out = []
     for i, pct in enumerate(pcts):
         rollouts = math.ceil(total_timesteps * pct / 100 / rollout_size)

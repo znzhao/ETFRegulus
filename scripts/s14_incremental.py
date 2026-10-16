@@ -110,6 +110,8 @@ def _settings(resolved: dict) -> dict:
         "first_year": int(wf.get("first_test_year", 2012)),
         "last_year": int(wf.get("last_test_year", 2025)),
         "candidates": int(wf.get("candidates", 4)),
+        # A checkpoint after every rollout instead of the 2-4-8-...% ladder (seeds_v4).
+        "checkpoint_every_rollout": bool(training.get("checkpoint_every_rollout", False)),
     }
 
 
@@ -161,7 +163,7 @@ def init(args, resolved: dict, chash: str, log: Log) -> None:
 
     s = _settings(resolved)
     rollout_size = s["n_steps"] * s["n_envs"]
-    schedule = checkpoint_schedule(s["total_timesteps"], rollout_size)
+    schedule = checkpoint_schedule(s["total_timesteps"], rollout_size, every_rollout=s["checkpoint_every_rollout"])
     c0 = schedule[0]
 
     campaign = {
@@ -247,7 +249,7 @@ def init_fresh(args, resolved: dict, chash: str, log: Log) -> None:
         "rollout_size": rollout_size, "n_envs": s["n_envs"],
         "total_timesteps": s["total_timesteps"],
         "first_year": s["first_year"], "last_year": s["last_year"],
-        "schedule": checkpoint_schedule(s["total_timesteps"], rollout_size),
+        "schedule": checkpoint_schedule(s["total_timesteps"], rollout_size, every_rollout=s["checkpoint_every_rollout"]),
         "checkpoints": {}, "candidates": {}, "throughput": {}, "sessions": [],
     }
     stage_resolved = dict(resolved)

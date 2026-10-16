@@ -5,3 +5,9 @@ extends: redesign_v3.yaml
 
 environment:
   obs_noise: 0.1
+
+# The budget is the old 5% (6 rollouts of 16,384 steps), now called 100%; a checkpoint
+# after every rollout (about every 16.7%).
+training:
+  total_timesteps: 98304
+  checkpoint_every_rollout: true
