@@ -82,7 +82,8 @@ class _YearlyPolicySource:
         return self.source(session, ctx)
 
 
-def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_drawdown: float):
+def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_drawdown: float,
+                     max_holdings: int = 0):
     from src.env.factory import env_config_from
     from src.env.feature_store import build_store
     from src.env.observation import ObservationSpec
@@ -95,7 +96,7 @@ def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_
     source = PolicyWeightSource(models, spec, store, market, hold_days=hold_days,
                                 max_drawdown=max_drawdown, decision_cadence=env_cfg.decision_cadence,
                                 preservation_daily=env_cfg.preservation_daily,
-                                action_mode=env_cfg.action_mode)
+                                action_mode=env_cfg.action_mode, max_holdings=max_holdings)
     return _YearlyPolicySource(source)
 
 
@@ -146,7 +147,8 @@ def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: in
     cfg = build_sim_config(resolved, constraints, max_drawdown=ceiling / 100, seed=42,
                            max_holdings=holdings)
     if strategy == RL_STRATEGY:
-        fn = rl_weight_source(market, resolved, hold_days=cfg.hold_days, max_drawdown=ceiling / 100)
+        fn = rl_weight_source(market, resolved, hold_days=cfg.hold_days, max_drawdown=ceiling / 100,
+                              max_holdings=holdings)
     else:
         params = resolved.get("baselines", {}).get("params", {}).get(strategy, {})
         fn = BASELINES[strategy].build(market, params)

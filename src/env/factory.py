@@ -99,6 +99,13 @@ def env_config_from(resolved: dict, constraints) -> EnvConfig:
         decision_cadence=int(env.get("decision_cadence", 0)),
         preservation_daily=bool(env.get("preservation_daily", False)),
         action_mode=str(env.get("action_mode", "full")),
+        max_holdings_values=tuple(int(v) for v in env.get("max_holdings_values", (0,))),
+        max_holdings_weights=(tuple(env["max_holdings_weights"])
+                              if env.get("max_holdings_weights") else None),
+        reward=str(env.get("reward", "log_return")),
+        dsr_eta=float(env.get("dsr_eta", 1.0 / 126)),
+        dsr_var_floor=float(env.get("dsr_var_floor", 0.003 ** 2)),
+        dsr_var_init=float(env.get("dsr_var_init", 0.01 ** 2)),
     )
 
 

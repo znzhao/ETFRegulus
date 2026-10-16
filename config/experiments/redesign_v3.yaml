@@ -1,0 +1,16 @@
+# The holdings-aware main line (2026-10-16, the user's request): redesign_v2 plus
+#   * the reward is the differential Sharpe ratio, aligned with the reported Sharpe;
+#   * a holdings limit (at most N ETFs, cash aside) sampled per episode from
+#     {no limit, 3, 5, 8} and shown to the policy as an observation parameter;
+#   * evaluation runs at a limit of 5 (other limits by re-evaluation, scripts/s17).
+extends: redesign_v2.yaml
+
+execution:
+  max_holdings: 5
+
+environment:
+  reward: dsr
+  max_holdings_values: [0, 3, 5, 8]
+
+observation:
+  max_holdings_param: true

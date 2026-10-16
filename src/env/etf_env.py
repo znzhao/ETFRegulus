@@ -103,6 +103,20 @@ class EnvConfig:
     #: floor, and weight put on a locked ETF is a purchase that relocks it. Feasible under
     #: the lock by construction.
     action_mode: str = "full"
+    #: The holdings limit, sampled per episode like N and D_max (0 = no limit). The policy
+    #: sees it only if the observation has `max_holdings_param`.
+    max_holdings_values: tuple[int, ...] = (0,)
+    max_holdings_weights: tuple[float, ...] | None = None
+    #: `log_return`: the session's log return (the original). `dsr`: the differential
+    #: Sharpe ratio (Moody & Saffell 2001) -- each session's marginal contribution to an
+    #: exponentially weighted Sharpe ratio, so maximizing the sum targets the Sharpe ratio
+    #: the evaluation reports. `dsr_eta` is the EMA rate; the variance is floored at
+    #: `dsr_var_floor` (daily) so a mostly-cash book cannot make the ratio explode, and
+    #: starts each episode at `dsr_var_init`.
+    reward: str = "log_return"
+    dsr_eta: float = 1.0 / 126
+    dsr_var_floor: float = 0.003 ** 2
+    dsr_var_init: float = 0.01 ** 2
 
 
 class InvariantViolation(AssertionError):
@@ -122,6 +136,7 @@ class EpisodeSpec:
     nav_at_reset: float
     peak_at_reset: float
     drawdown_at_reset: float
+    max_holdings: int = 0
 
     def to_dict(self) -> dict:
         d = self.__dict__.copy()
@@ -212,6 +227,8 @@ class ETFAllocationEnv(gym.Env):
             "max_drawdown",
             cfg.fixed_max_drawdown if cfg.fixed_max_drawdown is not None
             else self._sample_param(cfg.max_drawdown_values, cfg.max_drawdown_weights)))
+        max_holdings = int(options.get(
+            "max_holdings", self._sample_param(cfg.max_holdings_values, cfg.max_holdings_weights)))
         stress = bool(options.get("stress", cfg.stress_reset))
 
         window = options.get("window", self._window)
@@ -240,6 +257,7 @@ class ETFAllocationEnv(gym.Env):
             lock_scope=self.sim_cfg.lock_scope, risk_enabled=cfg.risk_enabled,
             seed=self.sim_cfg.seed, risk_lookback=self.sim_cfg.risk_lookback,
             peak_window=self.sim_cfg.peak_window, no_trade_band=self.sim_cfg.no_trade_band,
+            max_holdings=max_holdings,
         )
         # The peak is INHERITED from the sampled state, not reset to the NAV (with a
         # rolling peak, the sampled window of NAVs is restored -- R-3).
@@ -255,12 +273,13 @@ class ETFAllocationEnv(gym.Env):
         self._nav_at_reset = float(dec.nav)
         self._clock.reset()
         self._clock.due(dec.ctx)          # the first session is always a decision
+        self._dsr_a, self._dsr_b = 0.0, float(cfg.dsr_var_init)
 
         self.episode = EpisodeSpec(
             hold_days=hold_days, max_drawdown=max_drawdown, length=length,
             start_row=row, start_session=self.market.sessions[row], source=init.source,
             nav_at_reset=float(dec.nav), peak_at_reset=float(self.state.peak),
-            drawdown_at_reset=float(dec.drawdown),
+            drawdown_at_reset=float(dec.drawdown), max_holdings=max_holdings,
         )
 
         if self.cfg.strict and not stress and dec.drawdown > max_drawdown + 1e-9:
@@ -284,7 +303,7 @@ class ETFAllocationEnv(gym.Env):
         a_raw = target_weights(action, dec.ctx, self.cfg.action_mode)
         out = advance(self.market, self.state, self.sim_cfg, self._row, dec,
                       a_raw, self.projector)
-        reward = float(out.reward)
+        reward = self._reward(float(out.reward))
 
         self._row += 1
         self._steps += 1
@@ -307,7 +326,7 @@ class ETFAllocationEnv(gym.Env):
         while not truncated and not self._clock.due(next_dec.ctx):
             before_h = self.state.ledger.share_vector(self.market.universe)
             h = hold(self.market, self.state, self.sim_cfg, self._row, next_dec)
-            reward += float(h.reward)
+            reward += self._reward(float(h.reward))
             self._row += 1
             self._steps += 1
             held += 1
@@ -339,6 +358,19 @@ class ETFAllocationEnv(gym.Env):
 
     # ------------------------------------------------------------------ internals
 
+    def _reward(self, log_return: float) -> float:
+        """One session's reward from its log return (see `EnvConfig.reward`)."""
+        if self.cfg.reward == "log_return":
+            return log_return
+        if self.cfg.reward != "dsr":
+            raise ValueError(f"unknown reward {self.cfg.reward!r}")
+        a, b, eta = self._dsr_a, self._dsr_b, self.cfg.dsr_eta
+        da, db = log_return - a, log_return * log_return - b
+        var = max(b - a * a, self.cfg.dsr_var_floor)
+        d = (b * da - 0.5 * a * db) / var ** 1.5
+        self._dsr_a, self._dsr_b = a + eta * da, b + eta * db
+        return float(d)
+
     def _observe(self, dec) -> np.ndarray:
         return build_observation(
             self.obs_spec, self.store, self._row + self._feature_offset, dec.ctx,
@@ -346,6 +378,7 @@ class ETFAllocationEnv(gym.Env):
             max_drawdown=(self.episode.max_drawdown if self.episode
                           else self.sim_cfg.max_drawdown),
             nav_at_reset=self._nav_at_reset, out=self._obs_buffer,
+            max_holdings=self.sim_cfg.max_holdings,
         ).copy()
 
     def _info_from(self, dec) -> dict:

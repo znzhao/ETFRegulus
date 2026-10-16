@@ -56,6 +56,9 @@ MANDATORY_GLOBAL: tuple[str, ...] = (
 )
 
 MANDATORY_PARAMS: tuple[str, ...] = ("param_hold_days", "param_max_drawdown")
+#: Optional (`observation.max_holdings_param`): the holdings limit, as limit / n_assets,
+#: 1.0 for no limit.
+HOLDINGS_PARAM = "param_max_holdings"
 
 MANDATORY_FIELDS = MANDATORY_PER_ASSET + MANDATORY_GLOBAL + MANDATORY_PARAMS
 
@@ -75,6 +78,7 @@ class ObservationSpec:
     per_asset_cross_sectional: tuple[str, ...]
     hold_days_divisor: float = 365.0
     clip: float = 10.0
+    holdings_param: bool = False
     names: tuple[str, ...] = field(default=(), repr=False)
 
     # ------------------------------------------------------------------ geometry
@@ -82,6 +86,10 @@ class ObservationSpec:
     @property
     def n_assets(self) -> int:
         return len(self.tickers)
+
+    @property
+    def params(self) -> tuple[str, ...]:
+        return MANDATORY_PARAMS + ((HOLDINGS_PARAM,) if self.holdings_param else ())
 
     @property
     def per_asset_market(self) -> tuple[str, ...]:
@@ -117,7 +125,7 @@ class ObservationSpec:
     @property
     def param_slice(self) -> slice:
         start = self.portfolio_slice.stop
-        return slice(start, start + len(MANDATORY_PARAMS))
+        return slice(start, start + len(self.params))
 
     @property
     def size(self) -> int:
@@ -130,7 +138,7 @@ class ObservationSpec:
         for ticker in self.tickers:
             out.extend(f"a:{ticker}:{c}" for c in self.per_asset_fields)
         out.extend(f"p:{c}" for c in MANDATORY_GLOBAL)
-        out.extend(f"p:{c}" for c in MANDATORY_PARAMS)
+        out.extend(f"p:{c}" for c in self.params)
         return tuple(out)
 
     def index_of(self, name: str) -> int:
@@ -155,7 +163,7 @@ class ObservationSpec:
             "per_asset_portfolio": len(MANDATORY_PER_ASSET),
             "global_market": len(self.global_block),
             "portfolio_global": len(MANDATORY_GLOBAL),
-            "params": len(MANDATORY_PARAMS),
+            "params": len(self.params),
             "blocks": {
                 "macro": [self.macro_slice.start, self.macro_slice.stop],
                 "per_asset": [self.per_asset_slice.start, self.per_asset_slice.stop],
@@ -188,6 +196,7 @@ class ObservationSpec:
             per_asset_cross_sectional=tuple(per_asset.get("cross_sectional", ())),
             hold_days_divisor=float(scaling.get("hold_days_divisor", 365.0)),
             clip=float(scaling.get("clip", 10.0)),
+            holdings_param=bool(obs.get("max_holdings_param", False)),
         )
         spec = cls(**{**spec.__dict__, "names": spec.build_names()})
         if validate:

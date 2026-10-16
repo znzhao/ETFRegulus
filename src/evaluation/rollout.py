@@ -38,7 +38,7 @@ class PolicyWeightSource:
                  market: MarketData, *, hold_days: int, max_drawdown: float,
                  deterministic: bool = True, decision_cadence: int = 0,
                  preservation_daily: bool = False,
-                 action_mode: str = "full"):
+                 action_mode: str = "full", max_holdings: int = 0):
         self.model = model
         self.spec = spec
         self.store = store
@@ -50,6 +50,7 @@ class PolicyWeightSource:
         self._nav_at_reset: float | None = None
         self.n_calls = 0
         self.action_mode = action_mode
+        self.max_holdings = int(max_holdings)
         # The SAME clock the environment trains under, so the policy is evaluated on the
         # schedule it learned on. Between decisions it returns None: hold, do not trade.
         self._clock = DecisionClock(decision_cadence, preservation_daily)
@@ -68,7 +69,8 @@ class PolicyWeightSource:
         obs = build_observation(
             self.spec, self.store, row, ctx,
             hold_days=self.hold_days, max_drawdown=self.max_drawdown,
-            nav_at_reset=self._nav_at_reset, out=self._buffer)
+            nav_at_reset=self._nav_at_reset, out=self._buffer,
+            max_holdings=self.max_holdings)
         self.n_calls += 1
         s = policy_weights(self.model, obs, deterministic=self.deterministic)
         if self.action_mode == "full":
@@ -126,7 +128,8 @@ def rollout(model, bundle, *, hold_days: int, max_drawdown: float,
                                 deterministic=deterministic,
                                 decision_cadence=getattr(env_cfg, "decision_cadence", 0),
                                 preservation_daily=getattr(env_cfg, "preservation_daily", False),
-                                action_mode=getattr(env_cfg, "action_mode", "full"))
+                                action_mode=getattr(env_cfg, "action_mode", "full"),
+                                max_holdings=sim_cfg.max_holdings)
     return simulate(
         bundle.market, source, sim_cfg,
         projector=make_projector_from(bundle.constraints),

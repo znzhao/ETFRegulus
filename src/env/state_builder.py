@@ -34,6 +34,7 @@ def build_observation(
     max_drawdown: float,
     nav_at_reset: float,
     out: np.ndarray | None = None,
+    max_holdings: int = 0,
 ) -> np.ndarray:
     """Write one observation. `out` may be reused across steps to avoid reallocating.
 
@@ -99,8 +100,11 @@ def build_observation(
     # ---- parameter block ------------------------------------------------------
     # Fixed normalization, never fitted -- this is what makes deployment semantics
     # identical to training semantics (env-mdp.md section 4).
-    obs[spec.param_slice] = np.array(
-        [hold_days / spec.hold_days_divisor, max_drawdown], dtype=np.float32)
+    params = [hold_days / spec.hold_days_divisor, max_drawdown]
+    if spec.holdings_param:
+        k = spec.n_assets if max_holdings <= 0 else min(max_holdings, spec.n_assets)
+        params.append(k / spec.n_assets)
+    obs[spec.param_slice] = np.array(params, dtype=np.float32)
 
     if spec.clip:
         np.clip(obs, -spec.clip, spec.clip, out=obs)
