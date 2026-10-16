@@ -59,10 +59,13 @@ def _add_args(p: argparse.ArgumentParser) -> None:
 )
 def main(cfg: UniverseConfig, ctx: StageContext) -> None:
     """Align raw data to the session calendar and gate its quality."""
-    session_index = sessions(cfg.history_start, dt.date.today(), calendar=cfg.calendar)
+    raw = load_raw_prices(cfg.all_yfinance_symbols)
+    # End at the newest bar any symbol has, not today: a run after the close but before
+    # the data vendor publishes today's bars would otherwise see a one-day gap everywhere.
+    newest = max(d.index.max() for d in raw.values() if len(d)).date()
+    session_index = sessions(cfg.history_start, min(dt.date.today(), newest), calendar=cfg.calendar)
     ctx.log(f"{len(session_index)} sessions {session_index[0].date()} .. {session_index[-1].date()}")
 
-    raw = load_raw_prices(cfg.all_yfinance_symbols)
     prices, inception, violations = curate_prices(cfg, raw, session_index)
     ctx.log(f"curated {len(prices):,} (session, ticker) rows over "
             f"{prices['ticker'].nunique()} symbols")
