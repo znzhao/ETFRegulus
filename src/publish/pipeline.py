@@ -40,6 +40,7 @@ class Settings:
     end: str | None = None
     ceilings: tuple[int, ...] = CEILINGS
     holdings: tuple[int, ...] = HOLDINGS
+    workers: int = 1
     strategies: tuple[str, ...] = tuple(names.STRATEGIES)
 
 
@@ -59,7 +60,7 @@ def code_info() -> dict:
 # --------------------------------------------------------------------------- the RL model
 
 RL_STRATEGY = "rl"
-RL_MODEL_DIR = Path("models/webapp/seeds_v2_C5bb")
+RL_MODEL_DIR = Path("models/webapp/seeds_v4_C5")
 RL_FOLD = "fold_2025"
 
 
@@ -82,6 +83,25 @@ class _YearlyPolicySource:
         return self.source(session, ctx)
 
 
+_RL_PARTS: dict = {}
+
+
+def _rl_parts(market: MarketData, resolved: dict):
+    """Observation spec, feature store and seed models, loaded once per market per process."""
+    from src.env.feature_store import build_store
+    from src.env.observation import ObservationSpec
+    from src.evaluation.rollout import load_policy
+
+    key = (id(market), len(market.sessions))
+    if key not in _RL_PARTS:
+        spec = ObservationSpec.from_config(resolved, list(market.universe))
+        store = build_store(spec, market.sessions, fold_id=RL_FOLD, scalers_dir=RL_MODEL_DIR)
+        models = load_policy(sorted(p for p in RL_MODEL_DIR.iterdir() if p.is_dir()))
+        _RL_PARTS.clear()
+        _RL_PARTS[key] = (spec, store, models)
+    return _RL_PARTS[key]
+
+
 def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_drawdown: float,
                      max_holdings: int = 0):
     from src.env.factory import env_config_from
@@ -89,10 +109,8 @@ def rl_weight_source(market: MarketData, resolved: dict, *, hold_days: int, max_
     from src.env.observation import ObservationSpec
     from src.evaluation.rollout import PolicyWeightSource, load_policy
 
-    spec = ObservationSpec.from_config(resolved, list(market.universe))
-    store = build_store(spec, market.sessions, fold_id=RL_FOLD, scalers_dir=RL_MODEL_DIR)
+    spec, store, models = _rl_parts(market, resolved)
     env_cfg = env_config_from(resolved, build_constraints(resolved))
-    models = load_policy(sorted(p for p in RL_MODEL_DIR.iterdir() if p.is_dir()))
     source = PolicyWeightSource(models, spec, store, market, hold_days=hold_days,
                                 max_drawdown=max_drawdown, decision_cadence=env_cfg.decision_cadence,
                                 preservation_daily=env_cfg.preservation_daily,
@@ -109,9 +127,7 @@ def rl_doc(market: MarketData, resolved: dict, data_date: dt.date) -> dict:
     from src.evaluation.rollout import load_policy
     from src.publish import rl_live
 
-    spec = ObservationSpec.from_config(resolved, list(market.universe))
-    store = build_store(spec, market.sessions, fold_id=RL_FOLD, scalers_dir=RL_MODEL_DIR)
-    models = load_policy(sorted(p for p in RL_MODEL_DIR.iterdir() if p.is_dir()))
+    spec, store, models = _rl_parts(market, resolved)
     constraints = build_constraints(resolved)
     rules = {"no_trade_band": float(constraints.execution.no_trade_band),
              "derisk_step": float(constraints.projection.derisk_step),
@@ -140,19 +156,19 @@ def _path_from_trajectory(market: MarketData, traj: pd.DataFrame, strategy: str,
     # weight by less than `build.MIN_CHANGE` (top-ups the risk rule lets through almost
     # daily) are left out of the published list; the lock dates still reflect them.
     shares = np.vstack([np.zeros(len(universe)), traj[[f"shares_{t}" for t in universe]].to_numpy(float)])
-    unlock = pd.concat([pd.DataFrame([[pd.NaT] * len(universe)], columns=universe),
-                        traj[[f"unlock_date_{t}" for t in universe]].set_axis(universe, axis=1)],
-                       ignore_index=True)
+    # Unlock dates as int64 nanoseconds, NaT = the minimum int64 (never equal to a date).
+    ul = np.vstack([np.full(len(universe), np.iinfo(np.int64).min),
+                    np.column_stack([pd.to_datetime(traj[f"unlock_date_{t}"]).to_numpy("datetime64[ns]").view("int64")
+                                     for t in universe])])
+    nat = np.iinfo(np.int64).min
+    bought = (ul[1:] != nat) & (ul[1:] != ul[:-1])
+    sold = shares[1:] < shares[:-1] - 1e-9
+    moved = np.abs(w[1:, 1:] - w[:-1, 1:]) >= build.MIN_CHANGE
+    hit = (bought | sold) & moved
     rebalances = []
-    for k in range(1, len(dates)):
-        changes = []
-        for j, t in enumerate(universe):
-            bought = pd.notna(unlock.iat[k, j]) and unlock.iat[k, j] != unlock.iat[k - 1, j]
-            sold = shares[k, j] < shares[k - 1, j] - 1e-9
-            if (bought or sold) and abs(w[k, j + 1] - w[k - 1, j + 1]) >= build.MIN_CHANGE:
-                changes.append(build.Change(t, w[k - 1, j + 1], w[k, j + 1]))
-        if changes:
-            rebalances.append(build.Rebalance(dates[k], changes))
+    for k in np.flatnonzero(hit.any(axis=1)) + 1:
+        changes = [build.Change(universe[j], w[k - 1, j + 1], w[k, j + 1]) for j in np.flatnonzero(hit[k - 1])]
+        rebalances.append(build.Rebalance(dates[k], changes))
 
     last = traj.iloc[-1]
     locks = {t: last[f"unlock_date_{t}"].date() for t in universe
@@ -189,6 +205,84 @@ def run_portfolio(market: MarketData, resolved: dict, strategy: str, ceiling: in
     path.risk_state = ("capital_preservation" if dec.capital_preservation
                        else "over_budget" if diag.no_risk_increase else "normal")
     return path, envelope
+
+
+# --------------------------------------------------------------------------- all portfolios
+
+# Per-process state of the worker pool: the market and config, sent once per worker.
+_WORKER: dict = {}
+
+
+def _init_worker(market: MarketData, resolved: dict) -> None:
+    _WORKER.update(market=market, resolved=resolved)
+    _speed_settings()
+
+
+def _speed_settings() -> None:
+    """One torch thread (the policy's matrices are tiny; threads only add overhead) and
+    the shared risk-sample cache (every portfolio draws the same samples per session)."""
+    from src.constraints import risk_envelope
+    if risk_envelope.SAMPLE_CACHE is None:
+        risk_envelope.SAMPLE_CACHE = {}
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except ImportError:
+        pass
+
+
+def _run_task(task):
+    strategy, c, k = task
+    t0 = time.time()
+    p, _ = run_portfolio(_WORKER["market"], _WORKER["resolved"], strategy, c, k)
+    return p, time.time() - t0
+
+
+def _run_all(market: MarketData, resolved: dict, tasks: list, workers: int, log):
+    """Every portfolio, in `tasks` order: in a process pool when `workers` > 1."""
+    if workers <= 1:
+        _init_worker(market, resolved)
+        for t in tasks:
+            yield _run_task(t)
+        return
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+    if ctx.get_start_method() == "fork":
+        # Fill the risk-sample cache once in the parent; forked workers share it.
+        _init_worker(market, resolved)
+        t0 = time.time()
+        _prewarm_risk_samples(market, resolved)
+        log(f"risk samples for {len(market.sessions)} sessions prepared in {time.time() - t0:.0f}s")
+    log(f"{len(tasks)} portfolios on {workers} worker processes ({ctx.get_start_method()})")
+    with ProcessPoolExecutor(workers, mp_context=ctx, initializer=_init_worker,
+                             initargs=(market, resolved)) as ex:
+        yield from ex.map(_run_task, tasks)
+
+
+def _prewarm_risk_samples(market: MarketData, resolved: dict) -> None:
+    """Prepare every session's samples exactly as `engine.observe` will ask for them."""
+    constraints = build_constraints(resolved)
+    cfg = build_sim_config(resolved, constraints, seed=42)
+    env = build_envelope(constraints)
+    K = len(market.universe)
+    for i in range(len(market.sessions)):
+        lo = max(0, i - cfg.risk_lookback)
+        env.prepare(market.returns[lo:i + 1], market.sessions[lo:i + 1].to_numpy(),
+                    as_of=market.sessions[i].date(), seed=cfg.seed + i, n_assets=K + 1)
+
+
+def final_envelope(market: MarketData, resolved: dict):
+    """The risk envelope at the last session, as the last decision of any portfolio saw it."""
+    constraints = build_constraints(resolved)
+    cfg = build_sim_config(resolved, constraints, seed=42)
+    env = build_envelope(constraints)
+    i = len(market.sessions) - 1
+    lo = max(0, i - cfg.risk_lookback)
+    env.prepare(market.returns[lo:i + 1], market.sessions[lo:i + 1].to_numpy(),
+                as_of=market.sessions[i].date(), seed=cfg.seed + i, n_assets=len(market.universe) + 1)
+    return env
 
 
 # --------------------------------------------------------------------------- other documents
@@ -241,15 +335,15 @@ def build_site(settings: Settings, log: Callable[[str], None] = print) -> dict[s
     log(f"{len(market.universe)} ETFs, {len(market.sessions)} sessions "
         f"{market.sessions[0].date()} .. {data_date}; config {settings.config} ({config_hash(resolved)})")
 
-    paths, envelope = [], None
-    for strategy in settings.strategies:
-        for c, k in itertools.product(settings.ceilings, settings.holdings):
-            t0 = time.time()
-            p, envelope = run_portfolio(market, resolved, strategy, c, k)
-            paths.append(p)
-            m = build.metrics(p.equity / p.equity[0])
-            log(f"  {p.id:<26} {time.time() - t0:5.1f}s  Sharpe {m['sharpe']:5.2f}  maxDD {m['max_drawdown']:.3f}  "
-                f"{p.risk_state:<20} trades next open: {len(build.trades(p.weights[-1], p.target, p.assets))}")
+    tasks = [(s_, c, k) for s_ in settings.strategies
+             for c, k in itertools.product(settings.ceilings, settings.holdings)]
+    paths = []
+    for p, secs in _run_all(market, resolved, tasks, settings.workers, log):
+        paths.append(p)
+        m = build.metrics(p.equity / p.equity[0])
+        log(f"  {p.id:<26} {secs:5.1f}s  Sharpe {m['sharpe']:5.2f}  maxDD {m['max_drawdown']:.3f}  "
+            f"{p.risk_state:<20} trades next open: {len(build.trades(p.weights[-1], p.target, p.assets))}")
+    envelope = final_envelope(market, resolved)
 
     files = {"universe": "universe.json", "today": "today.json", "risk": "risk.json",
              "live": "live/index.json", "backtest": {p.id: f"backtest/{p.id}.json" for p in paths}}

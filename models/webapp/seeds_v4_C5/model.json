@@ -1,0 +1,12 @@
+{
+  "campaign": "seeds_v4",
+  "checkpoint": "C5",
+  "budget": "100% of the seeds_v4 budget (6 rollouts of 16,384 steps)",
+  "fold": "fold_2025",
+  "train_end": "2023-12-31",
+  "validation_year": 2024,
+  "config": "config/experiments/redesign_v4.yaml",
+  "seeds": [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
+  "ensemble": "mean of the seeds' portfolios",
+  "note": "Differential-Sharpe reward, holdings limit observed, observation noise and ent_coef 0.05 in training. Trained on data through 2023, validated on 2024; history before 2025 overlaps training data."
+}

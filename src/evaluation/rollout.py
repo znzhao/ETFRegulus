@@ -86,11 +86,28 @@ def policy_weights(model, obs, *, deterministic: bool = True) -> np.ndarray:
     A seed ensemble is the mean of the members' PORTFOLIOS, not of their raw actions:
     averaging actions (logits) would not give the average allocation.
     """
-    if isinstance(model, (list, tuple)):
-        return np.mean([softmax_weights(m.predict(obs, deterministic=deterministic)[0])
-                        for m in model], axis=0)
-    action, _ = model.predict(obs, deterministic=deterministic)
-    return softmax_weights(action)
+    models = model if isinstance(model, (list, tuple)) else [model]
+    if deterministic and all(hasattr(m, "policy") for m in models):
+        return np.mean([softmax_weights(_deterministic_action(m, obs)) for m in models], axis=0)
+    return np.mean([softmax_weights(m.predict(obs, deterministic=deterministic)[0]) for m in models], axis=0)
+
+
+def _deterministic_action(model, obs) -> np.ndarray:
+    """`model.predict(obs, deterministic=True)` without SB3's per-call overhead.
+
+    The same operations in the same order -- features, actor head, availability mask,
+    the distribution's mode (its mean), clipped to the action space -- so the result is
+    identical (tests/evaluation/test_fast_predict.py); it is several times faster, which
+    matters when ten seeds decide every session of a twenty-year path.
+    """
+    import torch
+
+    p = model.policy
+    with torch.no_grad():
+        o = torch.as_tensor(np.asarray(obs, dtype=np.float32)[None])
+        mean = p._mask(o, p.action_net(p.mlp_extractor.forward_actor(p.extract_features(o))))
+    a = mean.cpu().numpy()[0]
+    return np.clip(a, model.action_space.low, model.action_space.high)
 
 
 def load_policy(directory: Path, *, device: str = "cpu"):

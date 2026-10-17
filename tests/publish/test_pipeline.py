@@ -37,8 +37,11 @@ def test_webapp_config_is_the_research_main_line():
     assert r["projection"]["derisk_step"] > 0
     assert r["execution"]["no_trade_band"] > 0
     main_line = resolve_config("config/experiments/redesign_v2.yaml")
-    for k in ("drawdown", "projection", "execution", "lock", "risk"):
+    for k in ("drawdown", "projection", "lock", "risk"):
         assert r[k] == main_line[k]
+    # Same execution rules; the holdings limit is set per portfolio (none by default).
+    assert {**r["execution"], "max_holdings": 0} == {**main_line["execution"], "max_holdings": 0}
+    assert r["execution"]["max_holdings"] == 0
 
 
 def test_a_monthly_strategy_trades_about_monthly(momentum):

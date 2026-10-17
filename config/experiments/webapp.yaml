@@ -1,4 +1,11 @@
 # The web app's rule set (WEBAPP_PLAN.md Step 3): the research main line, unchanged --
 # D-F, the no-trade band (R-1), drawdown from the 12-month high (R-3) and O-2 stepwise
-# de-risking past the ceiling (R-4); see MODEL_REDESIGN_PLAN.md section 15.
-extends: redesign_v2.yaml
+# de-risking past the ceiling (R-4); see MODEL_REDESIGN_PLAN.md section 15. Extends
+# redesign_v4 (same rules as v2) because the published RL model (seeds_v4 C5) observes the
+# holdings limit; v4's training-only settings (reward, noise) do not affect the app. The
+# holdings limit is set per portfolio by Stage 15, not by v4's evaluation default.
+extends: redesign_v4.yaml
+
+# No default limit: Stage 15 sets it per portfolio.
+execution:
+  max_holdings: 0

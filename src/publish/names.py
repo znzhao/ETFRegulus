@@ -37,8 +37,8 @@ TICKERS: dict[str, tuple[str, str]] = {
 STRATEGIES: dict[str, dict] = {
     "rl": {
         "name": ("强化学习模型", "RL model"),
-        "description": ("训练好的强化学习模型（3 个种子的平均组合），每个交易日收盘后决定持仓。用 2023 年及以前的数据训练、2024 年验证；2025 年以前的历史与训练数据重叠，不是真正的样本外表现。",
-                        "The trained reinforcement-learning model (the average portfolio of 3 seeds), deciding holdings after every close. Trained on data through 2023 and validated on 2024; history before 2025 overlaps its training data and is not out-of-sample."),
+        "description": ("训练好的强化学习模型（10 个种子的平均组合），知道你最多持有几只，每个交易日收盘后决定持仓。用 2023 年及以前的数据训练、2024 年验证；2025 年以前的历史与训练数据重叠，不是真正的样本外表现。",
+                        "The trained reinforcement-learning model (the average portfolio of 10 seeds), aware of your holdings limit, deciding holdings after every close. Trained on data through 2023 and validated on 2024; history before 2025 overlaps its training data and is not out-of-sample."),
         "color": "#3d3a8c",
     },
     "spy_tlt_60_40": {

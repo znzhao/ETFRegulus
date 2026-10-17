@@ -68,6 +68,13 @@ def _loss_from_paths(paths: np.ndarray, w: np.ndarray, q: float,
 # ------------------------------------------------------------------- estimators
 
 
+#: Opt-in cache of prepared samples, shared by every envelope with the same settings. The
+#: samples depend only on the settings, the visible history and the seed, so portfolios
+#: simulated over the same market draw identical ones; the web app's 80-odd portfolios
+#: would otherwise rebuild them 80-odd times per session. `None` = off (the default).
+SAMPLE_CACHE: dict | None = None
+
+
 @dataclass
 class StressSample:
     """Cached horizon-cumulative return paths for one estimator, at one session."""
@@ -183,6 +190,16 @@ class RiskEnvelope:
         self._samples = []
         if returns.size == 0:
             return
+        key = None
+        if SAMPLE_CACHE is not None:
+            key = (self.quantile, self.horizon_days, self.block_length, self.n_bootstrap_paths,
+                   tuple(self.estimators), tuple(sorted((k, tuple(v)) for k, v in self.crisis_windows.items())),
+                   as_of, int(seed), int(n_assets), returns.shape,
+                   str(sessions[0]) if len(sessions) else None, str(sessions[-1]) if len(sessions) else None)
+            hit = SAMPLE_CACHE.get(key)
+            if hit is not None:
+                self._samples = list(hit)
+                return
         rng = np.random.default_rng(seed)
 
         if "rolling" in self.estimators:
@@ -199,6 +216,8 @@ class RiskEnvelope:
                 crisis_window_paths(returns, sessions, self.crisis_windows,
                                     self.horizon_days, as_of)))
         self._samples = [s for s in self._samples if s.paths.size]
+        if key is not None:
+            SAMPLE_CACHE[key] = tuple(self._samples)
 
     # --------------------------------------------------------------------- query
 

@@ -1,0 +1,3 @@
+extends: redesign_v4.yaml
+execution:
+  max_holdings: 8
